@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Louis Fitness Tracker</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="header-inner">
+    <div class="logo" id="profile-wrap">
+      <button class="logo-btn" id="logo-btn" onclick="toggleProfileMenu()" title="Changer de profil">
+        LOUIS<span>FIT</span>
+      </button>
+      <div class="profile-menu" id="profile-menu"></div>
+    </div>
+    <nav class="nav">
+      <button class="nav-btn active" onclick="showTab('training')">Plan d'Entraînement</button>
+      <button class="nav-btn" onclick="showTab('graphs')">Graphiques</button>
+      <button class="nav-btn" onclick="showTab('nutrition')">Plan Alimentaire</button>
+    </nav>
+  </div>
+</header>
+
+<!-- TAB: TRAINING -->
+<div id="tab-training" class="tab-content active">
+
+  <!-- HERO + SELECTOR wrapped together so the coach bg spans both -->
+  <div class="hero-wrapper">
+    <!-- Fixed coach background shared across hero + selector bar -->
+    <div class="hero-coach-bg">
+      <img src="coach1.png" alt="Coach" class="coach-img coach-img-1">
+      <img src="coach2.png" alt="Coach" class="coach-img coach-img-2">
+      <div class="hero-coach-overlay"></div>
+    </div>
+
+    <!-- Centred hero block: title + KPIs + buttons -->
+    <div class="hero-center">
+
+      <!-- Title -->
+      <div class="hero-title-block">
+        <span class="hero-label">Programme Mensuel</span>
+        <h1>Mon Plan <span class="accent">d'Entraînement</span></h1>
+      </div>
+
+      <!-- Dynamic KPIs -->
+      <div class="hero-kpis">
+        <div class="kpi-card">
+          <span class="kpi-num" id="kpi-jours">0</span>
+          <span class="kpi-label">Jours réalisés</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-num" id="kpi-semaines">0</span>
+          <span class="kpi-label">Semaines complètes</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-num" id="kpi-exercices">0</span>
+          <span class="kpi-label">Exercices réalisés</span>
+        </div>
+      </div>
+
+      <!-- Selector buttons (rendered by JS) -->
+      <div class="hero-selectors">
+        <div class="selector-group">
+          <span class="selector-label">Jour</span>
+          <div class="selector-btn-row">
+            <div class="day-btns" id="day-btns-container"></div>
+            <button class="btn-selector-add"    onclick="addDay()"    title="Ajouter un jour">+</button>
+            <button class="btn-selector-remove" onclick="removeDay()" title="Supprimer le dernier jour">−</button>
+          </div>
+        </div>
+        <div class="selector-group">
+          <span class="selector-label">Semaine</span>
+          <div class="selector-btn-row">
+            <div class="week-btns" id="week-btns-container"></div>
+            <button class="btn-selector-add"    onclick="addWeek()"    title="Ajouter une semaine">+</button>
+            <button class="btn-selector-remove" onclick="removeWeek()" title="Supprimer la dernière semaine">−</button>
+          </div>
+        </div>
+        <button class="btn-add-exercise" onclick="addExercise()">+ Exercice</button>
+      </div>
+
+    </div><!-- /hero-center -->
+  </div><!-- /hero-wrapper -->
+
+  <div class="gym-bg-section">
+    <div class="training-grid" id="training-grid"></div>
+  </div>
+</div>
+
+<!-- TAB: GRAPHS -->
+<div id="tab-graphs" class="tab-content">
+  <section class="hero-coach hero-coach-slim">
+    <div class="hero-coach-bg">
+      <img src="coach2.png" alt="Coach" class="coach-img coach-img-center">
+      <div class="hero-coach-overlay"></div>
+    </div>
+    <div class="hero-coach-content">
+      <div class="hero-text">
+        <span class="hero-label">Suivi</span>
+        <h1>Mes <span class="accent">Progressions</span></h1>
+        <p>Évolution semaine par semaine</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="graphs-container">
+    <div class="graph-card">
+      <h3>Poids de Corps (kg)</h3>
+      <canvas id="chart-poids"></canvas>
+    </div>
+    <div class="graph-card">
+      <h3>Graisse Corporelle (%)</h3>
+      <canvas id="chart-graisse"></canvas>
+    </div>
+    <div class="graph-card">
+      <h3>Volume d'Eau (%)</h3>
+      <canvas id="chart-eau"></canvas>
+    </div>
+    <div class="graph-card">
+      <h3>Masse Musculaire (kg)</h3>
+      <canvas id="chart-muscle"></canvas>
+    </div>
+  </div>
+
+  <div class="data-entry-section">
+    <h2>Saisir les données de la semaine</h2>
+    <div class="data-form">
+      <label>Semaine <input type="number" id="entry-week" min="1" max="16" value="5"></label>
+      <label>Poids (kg) <input type="number" id="entry-poids" step="0.1"></label>
+      <label>Graisse (%) <input type="number" id="entry-graisse" step="0.1"></label>
+      <label>Eau (%) <input type="number" id="entry-eau" step="0.1"></label>
+      <label>Masse musculaire (kg) <input type="number" id="entry-muscle" step="0.1"></label>
+      <button class="btn-primary" onclick="addDataEntry()">Enregistrer</button>
+    </div>
+  </div>
+
+  <div class="exercise-progress-section">
+    <h2>Progression par Exercice</h2>
+    <div class="exercise-selector">
+      <select id="exercise-select" onchange="updateExerciseChart()">
+        <option value="Abdos à la poulie/crunch">Abdos à la poulie/crunch</option>
+        <option value="Tirage uni horizontal">Tirage uni horizontal</option>
+        <option value="Low Row">Low Row</option>
+        <option value="Tirage vertical prise large">Tirage vertical prise large</option>
+        <option value="Curl biceps à la poulie">Curl biceps à la poulie</option>
+        <option value="Curl biceps supination sur banc">Curl biceps supination sur banc</option>
+        <option value="Couché à la smith">Couché à la smith</option>
+        <option value="Butterfly">Butterfly</option>
+        <option value="Chestpress classique">Chestpress classique</option>
+        <option value="Machine à dips">Machine à dips</option>
+        <option value="Extension triceps à la corde">Extension triceps à la corde</option>
+        <option value="Squat smith pieds surélevés">Squat smith pieds surélevés</option>
+        <option value="Fentes bulgares haltères">Fentes bulgares haltères</option>
+        <option value="Leg Extension">Leg Extension</option>
+        <option value="Leg curl assis">Leg curl assis</option>
+        <option value="Incliné smith">Incliné smith</option>
+        <option value="Lat Pulldown">Lat Pulldown</option>
+        <option value="Tractions guidées">Tractions guidées</option>
+        <option value="Élévations latérales assis">Élévations latérales assis</option>
+      </select>
+    </div>
+    <div class="graph-card full-width">
+      <canvas id="chart-exercise"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: NUTRITION -->
+<div id="tab-nutrition" class="tab-content">
+  <section class="hero-coach hero-coach-slim">
+    <div class="hero-coach-bg">
+      <img src="coach1.png" alt="Coach" class="coach-img coach-img-center">
+      <div class="hero-coach-overlay"></div>
+    </div>
+    <div class="hero-coach-content">
+      <div class="hero-text">
+        <span class="hero-label">Nutrition</span>
+        <h1>Plan <span class="accent">Alimentaire</span></h1>
+        <p>Programme nutritionnel hebdomadaire</p>
+      </div>
+      <div class="hero-stats">
+        <div class="stat-card"><span class="stat-num">~2100</span><span class="stat-label">kcal / jour</span></div>
+        <div class="stat-card"><span class="stat-num">~180g</span><span class="stat-label">Protéines</span></div>
+        <div class="stat-card"><span class="stat-num">~200g</span><span class="stat-label">Glucides</span></div>
+        <div class="stat-card"><span class="stat-num">~45g</span><span class="stat-label">Lipides</span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="day-nav-bar">
+    <span class="week-label">Jour :</span>
+    <div class="week-btns">
+      <button class="week-btn active" onclick="selectNutDay('lundi',this)">Lun</button>
+      <button class="week-btn" onclick="selectNutDay('mardi',this)">Mar</button>
+      <button class="week-btn" onclick="selectNutDay('mercredi',this)">Mer</button>
+      <button class="week-btn" onclick="selectNutDay('jeudi',this)">Jeu</button>
+      <button class="week-btn" onclick="selectNutDay('vendredi',this)">Ven</button>
+      <button class="week-btn" onclick="selectNutDay('samedi',this)">Sam</button>
+      <button class="week-btn" onclick="selectNutDay('dimanche',this)">Dim</button>
+    </div>
+  </div>
+
+  <div class="meals-grid" id="meals-grid"></div>
+
+  <div class="supplements-section">
+    <h2>Compléments Alimentaires</h2>
+    <div class="supplements-grid">
+      <div class="supplement-card">
+        <div class="supp-icon">☀️</div>
+        <h4>Matin</h4>
+        <ul><li>Vitamine D3</li><li>Oméga 3</li><li>Magnésium</li></ul>
+      </div>
+      <div class="supplement-card">
+        <div class="supp-icon">💪</div>
+        <h4>Pré-entraînement</h4>
+        <ul><li>Caféine</li><li>Créatine 5g</li></ul>
+      </div>
+      <div class="supplement-card">
+        <div class="supp-icon">🥛</div>
+        <h4>Post-entraînement</h4>
+        <ul><li>Whey Protéine</li><li>Glucides rapides</li></ul>
+      </div>
+      <div class="supplement-card">
+        <div class="supp-icon">🌙</div>
+        <h4>Soir</h4>
+        <ul><li>ZMA</li><li>Caséine</li></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VIDEO MODAL -->
+<div id="video-modal" class="modal hidden">
+  <div class="modal-backdrop" onclick="closeVideoModal()"></div>
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeVideoModal()">✕</button>
+    <h3 id="modal-exercise-name"></h3>
+    <p id="modal-exercise-tips"></p>
+    <!-- Video source tabs -->
+    <div class="video-tabs">
+      <button class="video-tab active" id="vtab-file" onclick="switchVideoTab('file')">📁 Fichier local</button>
+      <button class="video-tab" id="vtab-youtube" onclick="switchVideoTab('youtube')">▶ Lien YouTube</button>
+    </div>
+
+    <!-- File upload panel -->
+    <div class="video-panel" id="vpanel-file">
+      <div class="video-upload-area" id="video-area">
+        <div id="video-placeholder">
+          <div class="upload-icon">▶</div>
+          <p>Aucune vidéo importée</p>
+          <label class="btn-primary upload-label">
+            Importer une vidéo
+            <input type="file" accept="video/*" onchange="handleVideoUpload(event)" style="display:none">
+          </label>
+        </div>
+        <video id="exercise-video" controls style="display:none; width:100%; border-radius:8px;"></video>
+        <button id="change-video-btn" class="btn-secondary" style="display:none; margin-top:10px;" onclick="document.getElementById('video-file-input').click()">Changer la vidéo</button>
+        <input type="file" id="video-file-input" accept="video/*" style="display:none" onchange="handleVideoUpload(event)">
+      </div>
+    </div>
+
+    <!-- YouTube panel -->
+    <div class="video-panel" id="vpanel-youtube" style="display:none;">
+      <div class="youtube-input-row">
+        <input type="text" id="youtube-url-input"
+               placeholder="Coller le lien YouTube (ex: https://www.youtube.com/watch?v=…)"
+               oninput="previewYoutube(this.value)">
+        <button class="btn-primary" onclick="saveYoutubeLink()">Enregistrer</button>
+      </div>
+      <!-- YouTube preview: thumbnail + overlay play button + open link -->
+      <div id="youtube-preview-wrap" style="display:none; margin-top:12px;">
+        <div class="yt-preview-card">
+          <img id="yt-thumbnail" src="" alt="YouTube thumbnail">
+          <div class="yt-overlay" id="yt-overlay" onclick="openYoutubeInline()">
+            <div class="yt-play-btn">▶</div>
+            <span>Regarder sur YouTube</span>
+          </div>
+          <!-- Inline iframe shown after user clicks play -->
+          <iframe id="youtube-iframe"
+                  width="100%" height="100%"
+                  frameborder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowfullscreen
+                  style="display:none; border-radius:10px; position:absolute; inset:0;">
+          </iframe>
+        </div>
+        <div class="yt-actions">
+          <a id="yt-open-link" href="#" target="_blank" rel="noopener" class="btn-secondary yt-open-btn">
+            ↗ Ouvrir dans YouTube
+          </a>
+          <button class="btn-secondary" onclick="clearYoutubeInline()">✕ Réduire</button>
+        </div>
+      </div>
+      <div id="youtube-empty" class="youtube-empty">
+        <span>🔗</span>
+        <p>Collez un lien YouTube ci-dessus pour prévisualiser</p>
+      </div>
+    </div>
+    <div class="modal-meta">
+      <div class="modal-meta-item"><span>Séries</span><strong id="modal-series"></strong></div>
+      <div class="modal-meta-item"><span>Reps</span><strong id="modal-reps"></strong></div>
+      <div class="modal-meta-item"><span>Charge</span><strong id="modal-charge"></strong></div>
+      <div class="modal-meta-item"><span>Réalisé</span><strong id="modal-done"></strong></div>
+    </div>
+    <div class="notes-area">
+      <label>Notes personnelles</label>
+      <textarea id="modal-notes" placeholder="Ajouter vos notes…"></textarea>
+      <button class="btn-primary" onclick="saveNotes()">Sauvegarder</button>
+    </div>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
