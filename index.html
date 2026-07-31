@@ -25,12 +25,18 @@
       </button>
       <div class="profile-menu" id="profile-menu"></div>
     </div>
+    <!-- Coach-only: student switcher + add student (injected by auth.js) -->
+    <div id="coach-header-controls" style="display:none;align-items:center;gap:8px;flex-shrink:0">
+      <select id="coach-student-select" style="background:#1a1a1a;color:#fff;border:1px solid #333;border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer"></select>
+      <button id="coach-add-btn" onclick="_showCreateStudentModal()" style="background:transparent;border:1px solid #C8FF00;color:#C8FF00;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;white-space:nowrap">+ Ajouter</button>
+    </div>
     <nav class="nav" id="main-nav">
       <button class="nav-btn active" onclick="showTab('training')">Plan d'Entraînement</button>
       <button class="nav-btn" onclick="showTab('graphs')">Graphiques</button>
       <button class="nav-btn" onclick="showTab('nutrition')">Plan Alimentaire</button>
       <button class="nav-btn" onclick="showTab('photos')">Photos &amp; Mesures</button>
       <button class="btn-mobile-preview" id="btn-mobile-preview" onclick="toggleMobilePreview()" title="Aperçu mobile">📱 Mobile</button>
+      <button class="nav-btn" id="btn-signout" style="display:none" onclick="signOut()">Déconnexion</button>
     </nav>
     <!-- Mobile nav: label left, hamburger far right -->
     <div class="nav-mobile" id="nav-mobile">
@@ -45,6 +51,7 @@
       <button class="nav-drawer-btn" onclick="showTab('graphs');closeMobileNav()">Graphiques</button>
       <button class="nav-drawer-btn" onclick="showTab('nutrition');closeMobileNav()">Plan Alimentaire</button>
       <button class="nav-drawer-btn" onclick="showTab('photos');closeMobileNav()">Photos &amp; Mesures</button>
+      <button class="nav-drawer-btn" id="btn-signout-mobile" style="display:none" onclick="signOut();closeMobileNav()">Déconnexion</button>
     </div>
   </div>
 </header>

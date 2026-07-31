@@ -1,8 +1,3 @@
-// ============================================================
-// SUPABASE AUTH + COACH SWITCHER
-// Replace YOUR_PROJECT_URL and YOUR_ANON_KEY with your actual
-// values from Supabase → Project Settings → API
-// ============================================================
 const SUPABASE_URL  = 'https://kprgcrlpimtsoecwwpyl.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtwcmdjcmxwaW10c29lY3d3cHlsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0OTAzOTIsImV4cCI6MjEwMTA2NjM5Mn0.-3RipcCPFUgNI-1h2KBPrlhpmDuuPHJLNESsYf9gBLM';
 
@@ -25,6 +20,9 @@ async function initAuth() {
 async function _onSignedIn(uid) {
   _myProfile = await _fetchProfile(uid);
   if (!_myProfile) { showLoginScreen(); return; }
+
+  _showSignOutButton();
+
   if (_myProfile.role === 'coach') {
     await _buildCoachSwitcher();
     if (_viewingStudentId && typeof loadStudentData === 'function') {
@@ -37,6 +35,9 @@ async function _onSignedIn(uid) {
       .eq('user_id', _myProfile.id)
       .single();
     _viewingStudentId = data ? data.id : null;
+    if (_viewingStudentId && typeof loadStudentData === 'function') {
+      await loadStudentData(_viewingStudentId);
+    }
   }
   hideLoginScreen();
 }
@@ -46,7 +47,22 @@ async function _fetchProfile(uid) {
   return data;
 }
 
-// ── Coach student switcher ───────────────────────────────────
+// ── Show déconnexion button for all signed-in users ───────────
+function _showSignOutButton() {
+  const btn  = document.getElementById('btn-signout');
+  const btnM = document.getElementById('btn-signout-mobile');
+  if (btn)  btn.style.display  = '';
+  if (btnM) btnM.style.display = '';
+}
+
+function _hideSignOutButton() {
+  const btn  = document.getElementById('btn-signout');
+  const btnM = document.getElementById('btn-signout-mobile');
+  if (btn)  btn.style.display  = 'none';
+  if (btnM) btnM.style.display = 'none';
+}
+
+// ── Coach student switcher (uses header elements) ─────────────
 async function _buildCoachSwitcher() {
   const { data: students, error: swErr } = await sb
     .from('student_profiles')
@@ -56,30 +72,12 @@ async function _buildCoachSwitcher() {
   if (swErr) { console.error('[switcher]', swErr.message); }
   if (!students || !students.length) return;
 
-  let bar = document.getElementById('coach-switcher-bar');
-  if (!bar) {
-    bar = document.createElement('div');
-    bar.id = 'coach-switcher-bar';
-    bar.style.cssText = [
-      'position:fixed', 'top:0', 'left:0', 'right:0', 'z-index:9998',
-      'background:#111', 'border-bottom:1px solid #222',
-      'display:flex', 'align-items:center', 'gap:12px',
-      'padding:8px 20px', 'font-size:13px', 'color:#aaa'
-    ].join(';');
-    document.body.insertBefore(bar, document.body.firstChild);
-    document.body.style.paddingTop = (parseInt(document.body.style.paddingTop) || 0) + 42 + 'px';
-  }
+  const controls = document.getElementById('coach-header-controls');
+  const sel      = document.getElementById('coach-student-select');
+  if (!controls || !sel) return;
 
-  // Build bar using DOM (no innerHTML with data)
-  while (bar.firstChild) bar.removeChild(bar.firstChild);
-
-  const lbl = document.createElement('span');
-  lbl.style.color = '#666';
-  lbl.textContent = 'Étudiant :';
-  bar.appendChild(lbl);
-
-  const sel = document.createElement('select');
-  sel.style.cssText = 'background:#1a1a1a;color:#fff;border:1px solid #333;border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer';
+  // Rebuild options
+  while (sel.firstChild) sel.removeChild(sel.firstChild);
   students.forEach(s => {
     const opt = document.createElement('option');
     opt.value = s.id;
@@ -87,24 +85,14 @@ async function _buildCoachSwitcher() {
     opt.textContent = (prof && prof.full_name) ? prof.full_name : s.id;
     sel.appendChild(opt);
   });
-  sel.addEventListener('change', () => {
+
+  sel.onchange = () => {
     _viewingStudentId = sel.value;
     if (typeof onStudentSwitch === 'function') onStudentSwitch(_viewingStudentId);
-  });
+  };
+
   _viewingStudentId = students[0].id;
-  bar.appendChild(sel);
-
-  const addBtn = document.createElement('button');
-  addBtn.textContent = '+ Ajouter un étudiant';
-  addBtn.style.cssText = 'background:transparent;border:1px solid #C8FF00;color:#C8FF00;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer';
-  addBtn.addEventListener('click', _showCreateStudentModal);
-  bar.appendChild(addBtn);
-
-  const out = document.createElement('button');
-  out.textContent = 'Déconnexion';
-  out.style.cssText = 'margin-left:auto;background:transparent;border:1px solid #333;color:#666;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer';
-  out.addEventListener('click', signOut);
-  bar.appendChild(out);
+  controls.style.display = 'flex';
 }
 
 // ── Create-student modal ──────────────────────────────────────
@@ -124,10 +112,10 @@ function _showCreateStudentModal() {
   box.appendChild(title);
 
   const fields = [
-    { id: 'cs-name',  label: 'Nom complet',        type: 'text',     placeholder: 'Louis Dupont' },
-    { id: 'cs-email', label: 'Email',               type: 'email',    placeholder: 'etudiant@email.com' },
-    { id: 'cs-pass',  label: 'Mot de passe',        type: 'password', placeholder: 'Min. 6 caractères' },
-    { id: 'cs-goal',  label: 'Objectif (optionnel)',type: 'text',     placeholder: 'Prise de masse…' },
+    { id: 'cs-name',  label: 'Nom complet',         type: 'text',     placeholder: 'Louis Dupont' },
+    { id: 'cs-email', label: 'Email',                type: 'email',    placeholder: 'etudiant@email.com' },
+    { id: 'cs-pass',  label: 'Mot de passe',         type: 'password', placeholder: 'Min. 6 caractères' },
+    { id: 'cs-goal',  label: 'Objectif (optionnel)', type: 'text',     placeholder: 'Prise de masse…' },
   ];
   fields.forEach(f => {
     const wrap = document.createElement('div');
@@ -136,9 +124,7 @@ function _showCreateStudentModal() {
     lbl.textContent = f.label;
     lbl.style.cssText = 'color:#aaa;font-size:12px';
     const inp = document.createElement('input');
-    inp.id = f.id;
-    inp.type = f.type;
-    inp.placeholder = f.placeholder;
+    inp.id = f.id; inp.type = f.type; inp.placeholder = f.placeholder;
     inp.style.cssText = 'background:#1a1a1a;color:#fff;border:1px solid #333;border-radius:6px;padding:8px 10px;font-size:13px;outline:none';
     wrap.appendChild(lbl);
     wrap.appendChild(inp);
@@ -167,7 +153,11 @@ function _showCreateStudentModal() {
     const goal  = document.getElementById('cs-goal').value.trim();
 
     errEl.style.display = 'none';
-    if (!name || !email || !pass) { errEl.textContent = 'Nom, email et mot de passe sont requis.'; errEl.style.display = 'block'; return; }
+    if (!name || !email || !pass) {
+      errEl.textContent = 'Nom, email et mot de passe sont requis.';
+      errEl.style.display = 'block';
+      return;
+    }
 
     submit.disabled = true;
     submit.textContent = 'Création…';
@@ -181,13 +171,19 @@ function _showCreateStudentModal() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Erreur serveur');
+
       overlay.remove();
       await _buildCoachSwitcher();
-      // Switch to the new student immediately
-      const switcher = document.getElementById('coach-switcher-bar')?.querySelector('select');
-      if (switcher) {
-        for (const opt of switcher.options) {
-          if (opt.textContent === name) { switcher.value = opt.value; switcher.dispatchEvent(new Event('change')); break; }
+
+      // Auto-select the new student
+      const sel = document.getElementById('coach-student-select');
+      if (sel) {
+        for (const opt of sel.options) {
+          if (opt.textContent === name) {
+            sel.value = opt.value;
+            sel.dispatchEvent(new Event('change'));
+            break;
+          }
         }
       }
     } catch (e) {
@@ -202,7 +198,6 @@ function _showCreateStudentModal() {
   row.appendChild(submit);
   box.appendChild(row);
   overlay.appendChild(box);
-  // Close on backdrop click
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   document.body.appendChild(overlay);
   document.getElementById('cs-name').focus();
@@ -213,6 +208,9 @@ sb.auth.onAuthStateChange(async (event, session) => {
   if (event === 'SIGNED_OUT' || !session) {
     _myProfile = null;
     _viewingStudentId = null;
+    const controls = document.getElementById('coach-header-controls');
+    if (controls) controls.style.display = 'none';
+    _hideSignOutButton();
     showLoginScreen();
   }
   if (event === 'SIGNED_IN') {

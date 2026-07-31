@@ -84,10 +84,63 @@ loadProfileData();
 
 function persistTraining() {
   localStorage.setItem(pk('training'), JSON.stringify(trainingData.days));
+  _saveStudentPlanToSupabase();
 }
 function persistCounts() {
   localStorage.setItem(pk('weekCount'), weekCount);
   localStorage.setItem(pk('dayCount'),  dayCount);
+}
+
+// ── Sync full plan structure to Supabase ──────────────────────
+// Called after any structural edit (exercises, days, weeks, labels).
+// Debounced so rapid edits don't flood the API.
+let _planSaveTimer = null;
+function _saveStudentPlanToSupabase() {
+  if (typeof sb === 'undefined' || typeof activeStudentId !== 'function' || !activeStudentId()) return;
+  clearTimeout(_planSaveTimer);
+  _planSaveTimer = setTimeout(async () => {
+    const studentId = activeStudentId();
+    if (!studentId) return;
+
+    // Fetch the plan id for this student
+    const { data: plan } = await sb
+      .from('workout_plans')
+      .select('id')
+      .eq('student_id', studentId)
+      .maybeSingle();
+    if (!plan) return;
+
+    // Update plan meta
+    await sb.from('workout_plans').update({
+      week_count: weekCount,
+      day_count:  dayCount,
+      updated_at: new Date().toISOString(),
+    }).eq('id', plan.id);
+
+    // Delete all existing assignments then re-insert
+    await sb.from('exercise_assignments').delete().eq('plan_id', plan.id);
+
+    const assignments = [];
+    Object.entries(trainingData.days).forEach(([dayNum, day]) => {
+      (day.exercises || []).forEach((ex, pos) => {
+        const firstWeek = ex.weeks && ex.weeks[0];
+        assignments.push({
+          plan_id:        plan.id,
+          day_number:     Number(dayNum),
+          position:       pos,
+          name:           ex.name || '',
+          tips:           ex.tips || '',
+          target_series:  firstWeek ? (parseInt(firstWeek.series) || null) : null,
+          target_reps:    firstWeek ? String(firstWeek.reps || '') : '',
+          target_charge:  firstWeek ? (parseFloat(firstWeek.charge) || null) : null,
+        });
+      });
+    });
+
+    if (assignments.length > 0) {
+      await sb.from('exercise_assignments').insert(assignments);
+    }
+  }, 800);
 }
 
 // ============================================================
