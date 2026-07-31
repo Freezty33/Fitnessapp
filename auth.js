@@ -45,11 +45,12 @@ async function _fetchProfile(uid) {
 
 // ── Coach student switcher ───────────────────────────────────
 async function _buildCoachSwitcher() {
-  const { data: students } = await sb
+  const { data: students, error: swErr } = await sb
     .from('student_profiles')
-    .select('id, profiles(full_name)')
+    .select('id, profiles!student_profiles_user_id_fkey(full_name)')
     .eq('coach_id', _myProfile.id);
 
+  if (swErr) { console.error('[switcher]', swErr.message); }
   if (!students || !students.length) return;
 
   let bar = document.getElementById('coach-switcher-bar');
@@ -79,7 +80,8 @@ async function _buildCoachSwitcher() {
   students.forEach(s => {
     const opt = document.createElement('option');
     opt.value = s.id;
-    opt.textContent = (s.profiles && s.profiles.full_name) ? s.profiles.full_name : s.id;
+    const prof = s['profiles!student_profiles_user_id_fkey'] || s.profiles;
+    opt.textContent = (prof && prof.full_name) ? prof.full_name : s.id;
     sel.appendChild(opt);
   });
   sel.addEventListener('change', () => {
