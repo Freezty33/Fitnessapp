@@ -1,99 +1,107 @@
 // Netlify Function — creates a Supabase auth user + student_profiles row
-// Requires env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-// Called by the coach via POST with their JWT in Authorization header.
+// Uses native fetch (Node 18+) — no npm dependencies required.
+// Env vars needed: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY
 
-const { createClient } = require('@supabase/supabase-js');
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const ANON_KEY     = process.env.SUPABASE_ANON_KEY;
 
-const SUPABASE_URL  = process.env.SUPABASE_URL;
-const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+
+function json(statusCode, body) {
+  return { statusCode, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+}
+
+async function adminFetch(path, method = 'GET', body) {
+  const res = await fetch(`${SUPABASE_URL}${path}`, {
+    method,
+    headers: {
+      'apikey': SERVICE_KEY,
+      'Authorization': `Bearer ${SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
+    },
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = text; }
+  return { ok: res.ok, status: res.status, data };
+}
 
 exports.handler = async (event) => {
-  const cors = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  };
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS, body: '' };
+  if (event.httpMethod !== 'POST')    return json(405, { error: 'Method Not Allowed' });
 
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: cors, body: '' };
-  if (event.httpMethod !== 'POST') return { statusCode: 405, headers: cors, body: 'Method Not Allowed' };
-
-  if (!SUPABASE_URL || !SERVICE_KEY) {
-    return { statusCode: 500, headers: cors, body: JSON.stringify({ error: 'Server not configured' }) };
+  if (!SUPABASE_URL || !SERVICE_KEY || !ANON_KEY) {
+    return json(500, { error: 'Server not configured — check env vars' });
   }
 
-  // ── Verify caller is authenticated ──────────────────────────
+  // ── Verify caller JWT ─────────────────────────────────────────
   const authHeader = event.headers['authorization'] || '';
   const jwt = authHeader.replace(/^Bearer\s+/i, '');
-  if (!jwt) return { statusCode: 401, headers: cors, body: JSON.stringify({ error: 'Unauthorized' }) };
+  if (!jwt) return json(401, { error: 'Unauthorized' });
 
-  // Use anon client to verify the JWT (getUser validates the token with Supabase)
-  const anonClient = createClient(SUPABASE_URL, process.env.SUPABASE_ANON_KEY || '');
-  const { data: { user: caller }, error: authErr } = await anonClient.auth.getUser(jwt);
-  if (authErr || !caller) return { statusCode: 401, headers: cors, body: JSON.stringify({ error: 'Invalid token' }) };
+  const verifyRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${jwt}` },
+  });
+  if (!verifyRes.ok) return json(401, { error: 'Invalid token' });
+  const caller = (await verifyRes.json());
 
-  // Use admin client to check the caller's role
-  const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-  const { data: callerProfile } = await admin.from('profiles').select('role').eq('id', caller.id).single();
-  if (!callerProfile || callerProfile.role !== 'coach') {
-    return { statusCode: 403, headers: cors, body: JSON.stringify({ error: 'Forbidden: coaches only' }) };
+  // ── Check caller is coach ─────────────────────────────────────
+  const profileRes = await adminFetch(`/rest/v1/profiles?id=eq.${caller.id}&select=role`);
+  if (!profileRes.ok || !profileRes.data?.[0] || profileRes.data[0].role !== 'coach') {
+    return json(403, { error: 'Forbidden: coaches only' });
   }
 
-  // ── Parse request body ───────────────────────────────────────
+  // ── Parse body ────────────────────────────────────────────────
   let body;
-  try { body = JSON.parse(event.body || '{}'); } catch { return { statusCode: 400, headers: cors, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
+  try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
   const { email, password, full_name, goal_text } = body;
-  if (!email || !password || !full_name) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: 'email, password and full_name are required' }) };
-  }
-  if (password.length < 6) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: 'Password must be at least 6 characters' }) };
-  }
+  if (!email || !password || !full_name) return json(400, { error: 'email, password et full_name sont requis' });
+  if (password.length < 6)              return json(400, { error: 'Mot de passe : 6 caractères minimum' });
 
-  // ── Create the auth user ─────────────────────────────────────
-  const { data: newUser, error: createErr } = await admin.auth.admin.createUser({
+  // ── Create auth user ──────────────────────────────────────────
+  const createRes = await adminFetch('/auth/v1/admin/users', 'POST', {
     email,
     password,
     email_confirm: true,
     user_metadata: { full_name, role: 'student' },
   });
-  if (createErr) {
-    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: createErr.message }) };
+  if (!createRes.ok) {
+    const msg = createRes.data?.message || createRes.data?.msg || JSON.stringify(createRes.data);
+    return json(400, { error: msg });
   }
+  const studentAuthId = createRes.data.id;
 
-  const studentAuthId = newUser.user.id;
+  // ── Upsert profile row ────────────────────────────────────────
+  await adminFetch('/rest/v1/profiles', 'POST', { id: studentAuthId, role: 'student', full_name });
 
-  // ── Ensure profile row exists (trigger may race; upsert is safe) ──
-  await admin.from('profiles').upsert({
-    id: studentAuthId,
-    role: 'student',
-    full_name,
-  }, { onConflict: 'id' });
-
-  // ── Create student_profiles row ──────────────────────────────
-  const { data: sp, error: spErr } = await admin.from('student_profiles').insert({
+  // ── Create student_profiles row ───────────────────────────────
+  const spRes = await adminFetch('/rest/v1/student_profiles', 'POST', {
     user_id:   studentAuthId,
     coach_id:  caller.id,
     goal_text: goal_text || '',
-  }).select('id').single();
-  if (spErr) {
-    // Roll back the auth user so there's no orphan
-    await admin.auth.admin.deleteUser(studentAuthId);
-    return { statusCode: 500, headers: cors, body: JSON.stringify({ error: spErr.message }) };
+  });
+  if (!spRes.ok) {
+    await adminFetch(`/auth/v1/admin/users/${studentAuthId}`, 'DELETE');
+    return json(500, { error: spRes.data?.message || 'Erreur student_profiles' });
   }
+  const studentProfileId = Array.isArray(spRes.data) ? spRes.data[0].id : spRes.data.id;
 
-  // ── Create a blank workout plan ──────────────────────────────
-  await admin.from('workout_plans').insert({
-    student_id: sp.id,
+  // ── Create blank workout plan ─────────────────────────────────
+  await adminFetch('/rest/v1/workout_plans', 'POST', {
+    student_id: studentProfileId,
     coach_id:   caller.id,
     label:      'Programme S1',
     week_count: 5,
     day_count:  4,
   });
 
-  return {
-    statusCode: 200,
-    headers: { ...cors, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ok: true, student_profile_id: sp.id, full_name }),
-  };
+  return json(200, { ok: true, student_profile_id: studentProfileId, full_name });
 };
