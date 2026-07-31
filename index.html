@@ -3,9 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Louis Fitness Tracker</title>
+<title>LouisFIT — Coaching</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#C8FF00">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LouisFIT">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
 
@@ -483,6 +490,20 @@
 </div>
 
 <script src="data.js"></script>
+<script src="auth.js"></script>
+<script src="offline-sync.js"></script>
 <script src="app.js"></script>
+<script>
+  // Register service worker
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () =>
+      navigator.serviceWorker.register('/sw.js')
+        .then(r => console.log('SW registered', r.scope))
+        .catch(e => console.warn('SW failed', e))
+    );
+  }
+  // Boot auth after all scripts are loaded
+  window.addEventListener('load', () => initAuth());
+</script>
 </body>
 </html>

@@ -959,6 +959,21 @@ function saveWeekField(dayId, exIdx, wIdx, field, el) {
   weeks[wIdx][field] = val;
   persistTraining();
   updateKPIs();
+
+  // Sync to Supabase if authenticated
+  if (typeof activeStudentId === 'function' && activeStudentId()) {
+    const ex = trainingData.days[dayId].exercises[exIdx];
+    const w  = weeks[wIdx];
+    saveExerciseLog(activeStudentId(), {
+      exercise_name: ex.name,
+      week_number:   wIdx + 1,
+      logged_date:   new Date().toISOString().slice(0, 10),
+      series_done:   String(w.series || ''),
+      reps_done:     String(w.reps   || ''),
+      charge_kg:     parseFloat(w.charge) || null,
+      completed:     field === 'done'
+    });
+  }
 }
 
 // ============================================================
@@ -1499,12 +1514,14 @@ function renderBilanHistory() {
 }
 
 function addDataEntry() {
-  const week   = parseInt(document.getElementById('entry-week').value);
-  const poids  = parseFloat(document.getElementById('entry-poids').value);
+  const week    = parseInt(document.getElementById('entry-week').value);
+  const poids   = parseFloat(document.getElementById('entry-poids').value);
   const graisse = parseFloat(document.getElementById('entry-graisse').value);
-  const eau    = parseFloat(document.getElementById('entry-eau').value);
-  const muscle = parseFloat(document.getElementById('entry-muscle').value);
+  const eau     = parseFloat(document.getElementById('entry-eau').value);
+  const muscle  = parseFloat(document.getElementById('entry-muscle').value);
   if (!week) return;
+
+  // Update local state
   const idx = savedProgress.weeks.indexOf(week);
   if (idx === -1) {
     savedProgress.weeks.push(week);
@@ -1520,6 +1537,20 @@ function addDataEntry() {
   }
   localStorage.setItem(pk('progress'), JSON.stringify(savedProgress));
   initCharts();
+
+  // Sync to Supabase if authenticated
+  if (typeof sb !== 'undefined' && typeof activeStudentId === 'function' && activeStudentId()) {
+    sb.from('body_metrics').upsert({
+      student_id:    activeStudentId(),
+      week_number:   week,
+      recorded_at:   new Date().toISOString().slice(0, 10),
+      weight_kg:     isNaN(poids)   ? null : poids,
+      body_fat_pct:  isNaN(graisse) ? null : graisse,
+      water_pct:     isNaN(eau)     ? null : eau,
+      muscle_kg:     isNaN(muscle)  ? null : muscle,
+    }, { onConflict: 'student_id,week_number' })
+      .then(({ error }) => { if (error) console.warn('[sync] body_metrics', error.message); });
+  }
 }
 
 function updateExerciseChart() {
