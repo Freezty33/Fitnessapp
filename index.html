@@ -18,11 +18,27 @@
       </button>
       <div class="profile-menu" id="profile-menu"></div>
     </div>
-    <nav class="nav">
+    <nav class="nav" id="main-nav">
       <button class="nav-btn active" onclick="showTab('training')">Plan d'Entraînement</button>
       <button class="nav-btn" onclick="showTab('graphs')">Graphiques</button>
       <button class="nav-btn" onclick="showTab('nutrition')">Plan Alimentaire</button>
+      <button class="nav-btn" onclick="showTab('photos')">Photos &amp; Mesures</button>
+      <button class="btn-mobile-preview" id="btn-mobile-preview" onclick="toggleMobilePreview()" title="Aperçu mobile">📱 Mobile</button>
     </nav>
+    <!-- Mobile nav: label left, hamburger far right -->
+    <div class="nav-mobile" id="nav-mobile">
+      <span class="nav-mobile-label" id="nav-mobile-label">Plan d'Entraînement</span>
+      <button class="nav-hamburger" id="nav-hamburger" onclick="toggleMobileNav()" aria-label="Menu navigation">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+    <!-- Mobile nav drawer -->
+    <div class="nav-drawer" id="nav-drawer">
+      <button class="nav-drawer-btn active" onclick="showTab('training');closeMobileNav()">Plan d'Entraînement</button>
+      <button class="nav-drawer-btn" onclick="showTab('graphs');closeMobileNav()">Graphiques</button>
+      <button class="nav-drawer-btn" onclick="showTab('nutrition');closeMobileNav()">Plan Alimentaire</button>
+      <button class="nav-drawer-btn" onclick="showTab('photos');closeMobileNav()">Photos &amp; Mesures</button>
+    </div>
   </div>
 </header>
 
@@ -66,19 +82,23 @@
       <!-- Selector buttons (rendered by JS) -->
       <div class="hero-selectors">
         <div class="selector-group">
-          <span class="selector-label">Jour</span>
-          <div class="selector-btn-row">
-            <div class="day-btns" id="day-btns-container"></div>
+          <div class="selector-header">
+            <span class="selector-label">Jour</span>
             <button class="btn-selector-add"    onclick="addDay()"    title="Ajouter un jour">+</button>
             <button class="btn-selector-remove" onclick="removeDay()" title="Supprimer le dernier jour">−</button>
           </div>
+          <div class="selector-btn-row">
+            <div class="day-btns" id="day-btns-container"></div>
+          </div>
         </div>
         <div class="selector-group">
-          <span class="selector-label">Semaine</span>
-          <div class="selector-btn-row">
-            <div class="week-btns" id="week-btns-container"></div>
+          <div class="selector-header">
+            <span class="selector-label">Semaine</span>
             <button class="btn-selector-add"    onclick="addWeek()"    title="Ajouter une semaine">+</button>
             <button class="btn-selector-remove" onclick="removeWeek()" title="Supprimer la dernière semaine">−</button>
+          </div>
+          <div class="selector-btn-row">
+            <div class="week-btns" id="week-btns-container"></div>
           </div>
         </div>
         <button class="btn-add-exercise" onclick="addExercise()">+ Exercice</button>
@@ -108,6 +128,65 @@
     </div>
   </section>
 
+  <div class="exercise-progress-section">
+    <h2>Progression par Exercice</h2>
+    <div class="exercise-selector">
+      <select id="exercise-select" onchange="updateExerciseChart()">
+        <option value="Abdos à la poulie/crunch">Abdos à la poulie/crunch</option>
+        <option value="Tirage uni horizontal">Tirage uni horizontal</option>
+        <option value="Low Row">Low Row</option>
+        <option value="Tirage vertical prise large">Tirage vertical prise large</option>
+        <option value="Curl biceps à la poulie">Curl biceps à la poulie</option>
+        <option value="Curl biceps supination sur banc">Curl biceps supination sur banc</option>
+        <option value="Couché à la smith">Couché à la smith</option>
+        <option value="Butterfly">Butterfly</option>
+        <option value="Chestpress classique">Chestpress classique</option>
+        <option value="Machine à dips">Machine à dips</option>
+        <option value="Extension triceps à la corde">Extension triceps à la corde</option>
+        <option value="Squat smith pieds surélevés">Squat smith pieds surélevés</option>
+        <option value="Fentes bulgares haltères">Fentes bulgares haltères</option>
+        <option value="Leg Extension">Leg Extension</option>
+        <option value="Leg curl assis">Leg curl assis</option>
+        <option value="Incliné smith">Incliné smith</option>
+        <option value="Lat Pulldown">Lat Pulldown</option>
+        <option value="Tractions guidées">Tractions guidées</option>
+        <option value="Élévations latérales assis">Élévations latérales assis</option>
+      </select>
+    </div>
+    <div class="graph-card full-width">
+      <canvas id="chart-exercise"></canvas>
+    </div>
+  </div>
+
+  <!-- VOLUME LOAD GRAPHS -->
+  <div class="volume-section">
+    <h2>Volume de Charge par Groupe Musculaire</h2>
+    <p class="volume-formula">Volume = Poids × Répétitions × Séries — par semaine</p>
+    <div class="volume-controls">
+      <div class="vol-select-group">
+        <label>Groupe musculaire</label>
+        <select id="vol-muscle-select" onchange="updateVolumeChart()">
+          <option value="all">Tous</option>
+          <option value="Dos / Biceps">Dos / Biceps</option>
+          <option value="Pectoraux / Triceps">Pectoraux / Triceps</option>
+          <option value="Jambes">Jambes</option>
+          <option value="Épaules / Dos">Épaules / Dos</option>
+        </select>
+      </div>
+    </div>
+    <div class="graph-card full-width volume-chart-card">
+      <canvas id="chart-volume"></canvas>
+    </div>
+    <div class="volume-stacked-wrap">
+      <div class="graph-card full-width">
+        <h3>Volume Cumulé par Groupe (toutes semaines)</h3>
+        <canvas id="chart-volume-stacked"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div id="bilan-history-section"></div>
+
   <div class="graphs-container">
     <div class="graph-card">
       <h3>Poids de Corps (kg)</h3>
@@ -136,36 +215,6 @@
       <label>Eau (%) <input type="number" id="entry-eau" step="0.1"></label>
       <label>Masse musculaire (kg) <input type="number" id="entry-muscle" step="0.1"></label>
       <button class="btn-primary" onclick="addDataEntry()">Enregistrer</button>
-    </div>
-  </div>
-
-  <div class="exercise-progress-section">
-    <h2>Progression par Exercice</h2>
-    <div class="exercise-selector">
-      <select id="exercise-select" onchange="updateExerciseChart()">
-        <option value="Abdos à la poulie/crunch">Abdos à la poulie/crunch</option>
-        <option value="Tirage uni horizontal">Tirage uni horizontal</option>
-        <option value="Low Row">Low Row</option>
-        <option value="Tirage vertical prise large">Tirage vertical prise large</option>
-        <option value="Curl biceps à la poulie">Curl biceps à la poulie</option>
-        <option value="Curl biceps supination sur banc">Curl biceps supination sur banc</option>
-        <option value="Couché à la smith">Couché à la smith</option>
-        <option value="Butterfly">Butterfly</option>
-        <option value="Chestpress classique">Chestpress classique</option>
-        <option value="Machine à dips">Machine à dips</option>
-        <option value="Extension triceps à la corde">Extension triceps à la corde</option>
-        <option value="Squat smith pieds surélevés">Squat smith pieds surélevés</option>
-        <option value="Fentes bulgares haltères">Fentes bulgares haltères</option>
-        <option value="Leg Extension">Leg Extension</option>
-        <option value="Leg curl assis">Leg curl assis</option>
-        <option value="Incliné smith">Incliné smith</option>
-        <option value="Lat Pulldown">Lat Pulldown</option>
-        <option value="Tractions guidées">Tractions guidées</option>
-        <option value="Élévations latérales assis">Élévations latérales assis</option>
-      </select>
-    </div>
-    <div class="graph-card full-width">
-      <canvas id="chart-exercise"></canvas>
     </div>
   </div>
 </div>
@@ -234,83 +283,201 @@
   </div>
 </div>
 
+<!-- TAB: PHOTOS & MESURES -->
+<div id="tab-photos" class="tab-content">
+
+  <section class="hero-coach hero-coach-slim">
+    <div class="hero-coach-bg">
+      <img src="coach1.png" alt="Coach" class="coach-img coach-img-center">
+      <div class="hero-coach-overlay"></div>
+    </div>
+    <div class="hero-coach-content">
+      <div class="hero-text">
+        <span class="hero-label">Suivi Visuel</span>
+        <h1>Photos &amp; <span class="accent">Mesures</span></h1>
+        <p>Progression physique semaine par semaine</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- PHOTO TIMELINE -->
+  <div class="photos-section">
+    <div class="photos-section-header">
+      <h2>Timeline Photos</h2>
+      <div class="photo-week-selector">
+        <label>Semaine</label>
+        <select id="photo-week-select" onchange="renderPhotoTimeline()"></select>
+      </div>
+      <div class="photo-upload-btns">
+        <label class="btn-photo-upload" title="Avant">
+          Avant
+          <input type="file" accept="image/*" onchange="uploadPhoto(event,'front')" style="display:none">
+        </label>
+        <label class="btn-photo-upload" title="Côté">
+          Côté
+          <input type="file" accept="image/*" onchange="uploadPhoto(event,'side')" style="display:none">
+        </label>
+        <label class="btn-photo-upload" title="Dos">
+          Dos
+          <input type="file" accept="image/*" onchange="uploadPhoto(event,'back')" style="display:none">
+        </label>
+      </div>
+    </div>
+
+    <!-- Weekly photo grid (rendered by JS) -->
+    <div id="photo-timeline" class="photo-timeline"></div>
+
+    <!-- Before / After comparison -->
+    <div class="comparison-section">
+      <h3>Comparaison Avant / Après</h3>
+      <div class="comparison-controls">
+        <div class="comp-select-group">
+          <label>Semaine A</label>
+          <select id="comp-week-a" onchange="renderComparison()"></select>
+        </div>
+        <div class="comp-select-group">
+          <label>Vue</label>
+          <select id="comp-view" onchange="renderComparison()">
+            <option value="front">Avant</option>
+            <option value="side">Côté</option>
+            <option value="back">Dos</option>
+          </select>
+        </div>
+        <div class="comp-select-group">
+          <label>Semaine B</label>
+          <select id="comp-week-b" onchange="renderComparison()"></select>
+        </div>
+      </div>
+      <div class="comparison-viewer" id="comparison-viewer">
+        <div class="comp-side" id="comp-img-a">
+          <span class="comp-label" id="comp-label-a">—</span>
+          <div class="comp-photo-wrap"><img id="comp-photo-a" src="" alt=""></div>
+        </div>
+        <div class="comp-divider">
+          <div class="comp-vs">VS</div>
+        </div>
+        <div class="comp-side" id="comp-img-b">
+          <span class="comp-label" id="comp-label-b">—</span>
+          <div class="comp-photo-wrap"><img id="comp-photo-b" src="" alt=""></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BODY MEASUREMENTS -->
+  <div class="measurements-section">
+    <h2>Mensurations</h2>
+    <div class="measurements-entry">
+      <div class="meas-week-row">
+        <label>Semaine <input type="number" id="meas-week" min="1" max="52" value="1"></label>
+        <button class="btn-primary btn-save-meas" onclick="saveMeasurements()">Enregistrer</button>
+      </div>
+      <div class="meas-inputs-grid">
+        <label>Poids (kg)<input type="number" id="meas-poids" step="0.1" placeholder="—"></label>
+        <label>Taille (cm)<input type="number" id="meas-taille" step="0.1" placeholder="—"></label>
+        <label>Tour de taille (cm)<input type="number" id="meas-waist" step="0.1" placeholder="—"></label>
+        <label>Tour de poitrine (cm)<input type="number" id="meas-chest" step="0.1" placeholder="—"></label>
+        <label>Tour de bras G (cm)<input type="number" id="meas-arm-l" step="0.1" placeholder="—"></label>
+        <label>Tour de bras D (cm)<input type="number" id="meas-arm-r" step="0.1" placeholder="—"></label>
+        <label>Tour de cuisse G (cm)<input type="number" id="meas-thigh-l" step="0.1" placeholder="—"></label>
+        <label>Tour de cuisse D (cm)<input type="number" id="meas-thigh-r" step="0.1" placeholder="—"></label>
+        <label>Tour de hanches (cm)<input type="number" id="meas-hips" step="0.1" placeholder="—"></label>
+        <label>Graisse corp. (%)<input type="number" id="meas-fat" step="0.1" placeholder="—"></label>
+      </div>
+    </div>
+    <div class="meas-charts-grid">
+      <div class="graph-card"><h3>Poids (kg)</h3><canvas id="chart-meas-poids"></canvas></div>
+      <div class="graph-card"><h3>Tour de taille (cm)</h3><canvas id="chart-meas-waist"></canvas></div>
+      <div class="graph-card"><h3>Tour de poitrine (cm)</h3><canvas id="chart-meas-chest"></canvas></div>
+      <div class="graph-card"><h3>Bras G / D (cm)</h3><canvas id="chart-meas-arms"></canvas></div>
+      <div class="graph-card"><h3>Cuisses G / D (cm)</h3><canvas id="chart-meas-thighs"></canvas></div>
+      <div class="graph-card"><h3>Tour de hanches (cm)</h3><canvas id="chart-meas-hips"></canvas></div>
+    </div>
+    <div class="meas-table-wrap">
+      <table class="meas-history-table" id="meas-history-table">
+        <thead><tr>
+          <th>S.</th><th>Poids</th><th>Taille</th><th>Taille (cm)</th><th>Poitrine</th>
+          <th>Bras G</th><th>Bras D</th><th>Cuisse G</th><th>Cuisse D</th><th>Hanches</th><th>Graisse%</th><th></th>
+        </tr></thead>
+        <tbody id="meas-history-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+
+</div>
+
 <!-- VIDEO MODAL -->
 <div id="video-modal" class="modal hidden">
   <div class="modal-backdrop" onclick="closeVideoModal()"></div>
   <div class="modal-box">
-    <button class="modal-close" onclick="closeVideoModal()">✕</button>
-    <h3 id="modal-exercise-name"></h3>
-    <p id="modal-exercise-tips"></p>
-    <!-- Video source tabs -->
-    <div class="video-tabs">
-      <button class="video-tab active" id="vtab-file" onclick="switchVideoTab('file')">📁 Fichier local</button>
-      <button class="video-tab" id="vtab-youtube" onclick="switchVideoTab('youtube')">▶ Lien YouTube</button>
+    <div class="modal-box-header">
+      <button class="modal-close" onclick="closeVideoModal()">✕</button>
+      <h3 id="modal-exercise-name"></h3>
+      <p id="modal-exercise-tips"></p>
     </div>
-
-    <!-- File upload panel -->
-    <div class="video-panel" id="vpanel-file">
-      <div class="video-upload-area" id="video-area">
-        <div id="video-placeholder">
-          <div class="upload-icon">▶</div>
-          <p>Aucune vidéo importée</p>
-          <label class="btn-primary upload-label">
-            Importer une vidéo
-            <input type="file" accept="video/*" onchange="handleVideoUpload(event)" style="display:none">
-          </label>
-        </div>
-        <video id="exercise-video" controls style="display:none; width:100%; border-radius:8px;"></video>
-        <button id="change-video-btn" class="btn-secondary" style="display:none; margin-top:10px;" onclick="document.getElementById('video-file-input').click()">Changer la vidéo</button>
-        <input type="file" id="video-file-input" accept="video/*" style="display:none" onchange="handleVideoUpload(event)">
+    <div class="modal-box-scroll">
+      <!-- Video source tabs -->
+      <div class="video-tabs">
+        <button class="video-tab active" id="vtab-file" onclick="switchVideoTab('file')">📁 Fichier local</button>
+        <button class="video-tab" id="vtab-youtube" onclick="switchVideoTab('youtube')">▶ Lien YouTube</button>
       </div>
-    </div>
 
-    <!-- YouTube panel -->
-    <div class="video-panel" id="vpanel-youtube" style="display:none;">
-      <div class="youtube-input-row">
-        <input type="text" id="youtube-url-input"
-               placeholder="Coller le lien YouTube (ex: https://www.youtube.com/watch?v=…)"
-               oninput="previewYoutube(this.value)">
-        <button class="btn-primary" onclick="saveYoutubeLink()">Enregistrer</button>
-      </div>
-      <!-- YouTube preview: thumbnail + overlay play button + open link -->
-      <div id="youtube-preview-wrap" style="display:none; margin-top:12px;">
-        <div class="yt-preview-card">
-          <img id="yt-thumbnail" src="" alt="YouTube thumbnail">
-          <div class="yt-overlay" id="yt-overlay" onclick="openYoutubeInline()">
-            <div class="yt-play-btn">▶</div>
-            <span>Regarder sur YouTube</span>
+      <!-- File upload panel -->
+      <div class="video-panel" id="vpanel-file">
+        <div class="video-upload-area" id="video-area">
+          <div id="video-placeholder">
+            <div class="upload-icon">▶</div>
+            <p>Aucune vidéo importée</p>
+            <label class="btn-primary upload-label">
+              Importer une vidéo
+              <input type="file" accept="video/*" onchange="handleVideoUpload(event)" style="display:none">
+            </label>
           </div>
-          <!-- Inline iframe shown after user clicks play -->
-          <iframe id="youtube-iframe"
-                  width="100%" height="100%"
-                  frameborder="0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowfullscreen
-                  style="display:none; border-radius:10px; position:absolute; inset:0;">
-          </iframe>
-        </div>
-        <div class="yt-actions">
-          <a id="yt-open-link" href="#" target="_blank" rel="noopener" class="btn-secondary yt-open-btn">
-            ↗ Ouvrir dans YouTube
-          </a>
-          <button class="btn-secondary" onclick="clearYoutubeInline()">✕ Réduire</button>
+          <video id="exercise-video" controls style="display:none; width:100%; border-radius:8px;"></video>
+          <button id="change-video-btn" class="btn-secondary" style="display:none; margin-top:10px;" onclick="document.getElementById('video-file-input').click()">Changer la vidéo</button>
+          <input type="file" id="video-file-input" accept="video/*" style="display:none" onchange="handleVideoUpload(event)">
         </div>
       </div>
-      <div id="youtube-empty" class="youtube-empty">
-        <span>🔗</span>
-        <p>Collez un lien YouTube ci-dessus pour prévisualiser</p>
+
+      <!-- YouTube panel -->
+      <div class="video-panel" id="vpanel-youtube" style="display:none;">
+        <div class="youtube-input-row">
+          <input type="text" id="youtube-url-input"
+                 placeholder="Coller le lien YouTube (ex: https://www.youtube.com/watch?v=…)"
+                 oninput="previewYoutube(this.value)">
+          <button class="btn-primary" onclick="saveYoutubeLink()">Enregistrer</button>
+        </div>
+        <!-- YouTube preview: thumbnail + overlay play button + open link -->
+        <div id="youtube-preview-wrap" style="display:none; margin-top:12px;">
+          <div class="yt-preview-card">
+            <img id="yt-thumbnail" src="" alt="YouTube thumbnail">
+            <div class="yt-overlay" id="yt-overlay" onclick="openYoutubeInline()">
+              <div class="yt-play-btn">▶</div>
+              <span>Regarder sur YouTube</span>
+            </div>
+            <!-- Inline iframe shown after user clicks play -->
+            <iframe id="youtube-iframe"
+                    width="100%" height="100%"
+                    frameborder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowfullscreen
+                    style="display:none; border-radius:10px; position:absolute; inset:0;">
+            </iframe>
+          </div>
+          <div class="yt-actions">
+            <a id="yt-open-link" href="#" target="_blank" rel="noopener" class="btn-secondary yt-open-btn">
+              ↗ Ouvrir dans YouTube
+            </a>
+            <button class="btn-secondary" onclick="clearYoutubeInline()">✕ Réduire</button>
+          </div>
+        </div>
+        <div id="youtube-empty" class="youtube-empty">
+          <span>🔗</span>
+          <p>Collez un lien YouTube ci-dessus pour prévisualiser</p>
+        </div>
       </div>
-    </div>
-    <div class="modal-meta">
-      <div class="modal-meta-item"><span>Séries</span><strong id="modal-series"></strong></div>
-      <div class="modal-meta-item"><span>Reps</span><strong id="modal-reps"></strong></div>
-      <div class="modal-meta-item"><span>Charge</span><strong id="modal-charge"></strong></div>
-      <div class="modal-meta-item"><span>Réalisé</span><strong id="modal-done"></strong></div>
-    </div>
-    <div class="notes-area">
-      <label>Notes personnelles</label>
-      <textarea id="modal-notes" placeholder="Ajouter vos notes…"></textarea>
-      <button class="btn-primary" onclick="saveNotes()">Sauvegarder</button>
+      <button class="btn-primary modal-close-btn" onclick="closeVideoModal()">Fermer</button>
     </div>
   </div>
 </div>

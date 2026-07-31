@@ -1,4 +1,11 @@
 // ============================================================
+// HTML ESCAPE HELPER
+// ============================================================
+function h(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ============================================================
 // PROFILES
 // ============================================================
 const PROFILE_COLORS = ['#C8FF00','#00D4FF','#FF6B35','#FF3CAC','#7B2FBE','#00C896'];
@@ -36,6 +43,22 @@ let currentExercise = null;
 let charts = {};
 let savedVideos, savedYoutube, savedNotes, savedProgress, mealOptions, weekCount, dayCount;
 
+// Timer state (keyed by exercise index in current view)
+let timerState = {};
+let timerDefaults = {};
+// Meal check state (keyed by "day_mealId_itIdx")
+let mealChecks = {};
+// Voice recordings (keyed by exercise name → base64 data URL)
+let savedVoice = {};
+// Workout feedback (keyed by "dayId_weekNum")
+let workoutFeedback = {};
+// MediaRecorder state
+let _recState = {};
+// Progress photos (keyed by "week_view" → data URL)
+let progressPhotos = {};
+// Body measurements (array of {week, poids, taille, waist, chest, armL, armR, thighL, thighR, hips, fat})
+let measurements = [];
+
 function loadProfileData() {
   const saved = JSON.parse(localStorage.getItem(pk('training')) || 'null');
   trainingData.days = saved || JSON.parse(JSON.stringify(_DEFAULT_DAYS));
@@ -46,6 +69,14 @@ function loadProfileData() {
   mealOptions   = JSON.parse(localStorage.getItem(pk('meals'))    || '{}');
   weekCount     = parseInt(localStorage.getItem(pk('weekCount'))  || '5');
   dayCount      = parseInt(localStorage.getItem(pk('dayCount'))   || String(Object.keys(trainingData.days).length));
+  timerDefaults   = JSON.parse(localStorage.getItem(pk('timers'))      || '{}');
+  mealChecks      = JSON.parse(localStorage.getItem(pk('mealChecks'))  || '{}');
+  savedVoice      = JSON.parse(localStorage.getItem(pk('voice'))        || '{}');
+  workoutFeedback = JSON.parse(localStorage.getItem(pk('feedback'))     || '{}');
+  progressPhotos  = JSON.parse(localStorage.getItem(pk('photos'))       || '{}');
+  measurements    = JSON.parse(localStorage.getItem(pk('measurements')) || '[]');
+  const savedNut = localStorage.getItem(pk('nutData'));
+  if (savedNut) nutritionData.meals = JSON.parse(savedNut);
   currentWeek = 1; currentDay = 1; currentNutDay = 'lundi';
 }
 
@@ -104,14 +135,60 @@ function updateKPIs() {
 // ============================================================
 // TAB NAVIGATION
 // ============================================================
+const TAB_LABELS = {
+  training: "Plan d'Entraînement",
+  graphs:   'Graphiques',
+  nutrition:'Plan Alimentaire',
+  photos:   'Photos & Mesures',
+};
+
 function showTab(tab) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.nav-drawer-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + tab).classList.add('active');
-  const idx = ['training','graphs','nutrition'].indexOf(tab);
-  document.querySelectorAll('.nav-btn')[idx].classList.add('active');
+  const idx = ['training','graphs','nutrition','photos'].indexOf(tab);
+  if (idx !== -1) {
+    document.querySelectorAll('.nav-btn')[idx].classList.add('active');
+    document.querySelectorAll('.nav-drawer-btn')[idx].classList.add('active');
+  }
+  const lbl = document.getElementById('nav-mobile-label');
+  if (lbl) lbl.textContent = TAB_LABELS[tab] || tab;
   if (tab === 'graphs') initCharts();
   if (tab === 'nutrition') renderMeals();
+  if (tab === 'photos') renderPhotosTab();
+}
+
+function toggleMobileNav() {
+  const drawer = document.getElementById('nav-drawer');
+  const btn    = document.getElementById('nav-hamburger');
+  if (!drawer) return;
+  const open = drawer.classList.toggle('open');
+  if (btn) btn.classList.toggle('open', open);
+  if (open) {
+    const header = document.querySelector('.header');
+    if (header) drawer.style.top = header.getBoundingClientRect().height + 'px';
+    // Use a document-level listener so the drawer buttons are never blocked
+    setTimeout(() => document.addEventListener('click', _navOutsideClick), 0);
+  } else {
+    document.removeEventListener('click', _navOutsideClick);
+  }
+}
+
+function _navOutsideClick(e) {
+  const drawer = document.getElementById('nav-drawer');
+  const btn    = document.getElementById('nav-hamburger');
+  if (drawer && !drawer.contains(e.target) && btn && !btn.contains(e.target)) {
+    closeMobileNav();
+  }
+}
+
+function closeMobileNav() {
+  const drawer = document.getElementById('nav-drawer');
+  const btn    = document.getElementById('nav-hamburger');
+  if (drawer) drawer.classList.remove('open');
+  if (btn)    btn.classList.remove('open');
+  document.removeEventListener('click', _navOutsideClick);
 }
 
 // ============================================================
@@ -149,6 +226,22 @@ function selectDay(d, btn) {
   currentDay = d;
   document.querySelectorAll('#day-btns-container .day-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  renderTraining();
+}
+
+// Clone current day's exercises to a new day
+function repeatTraining(sourceDay) {
+  const newId = dayCount + 1;
+  dayCount++;
+  const sourceExercises = (trainingData.days[sourceDay] || {}).exercises || [];
+  trainingData.days[newId] = {
+    label: `Jour ${newId}`,
+    exercises: JSON.parse(JSON.stringify(sourceExercises))
+  };
+  persistTraining();
+  persistCounts();
+  currentDay = newId;
+  renderSelectors();
   renderTraining();
 }
 
@@ -220,6 +313,7 @@ function removeWeek() {
 // TRAINING — RENDER (inline editable)
 // ============================================================
 function renderTraining() {
+  stopAllTimers();
   const grid = document.getElementById('training-grid');
   const dayData = trainingData.days[currentDay];
   if (!dayData) return;
@@ -227,14 +321,46 @@ function renderTraining() {
 
   let html = `
     <div class="day-header">
-      <h2 contenteditable="true" class="editable-title" onblur="saveDayLabel(${currentDay}, this)">${dayData.label}</h2>
+      <h2 contenteditable="true" class="editable-title" onblur="saveDayLabel(${currentDay}, this)">${h(dayData.label)}</h2>
       <span class="week-badge">Semaine ${currentWeek}</span>
+      <button class="btn-repeat-training" onclick="repeatTraining(${currentDay})">🔁 Répéter cet entraînement</button>
     </div>
     <div class="exercises-list">`;
 
   dayData.exercises.forEach((ex, i) => {
     const w = ex.weeks[wIdx] || { series:'', reps:'', charge:'', done:'' };
     const hasVideo = savedVideos[ex.name];
+
+    // Feature 2: previous session hints
+    let prevHint = '';
+    let prevChargeHint = '';
+    if (wIdx > 0) {
+      const prevW = ex.weeks[wIdx - 1];
+      const prevDone = prevW && String(prevW.done || '').trim();
+      if (prevDone && prevDone !== '—') {
+        prevHint = `<span class="prev-session">S${wIdx}: ${h(prevDone)}</span>`;
+      }
+      const prevCharge = prevW && String(prevW.charge || '').trim();
+      if (prevCharge && prevCharge !== '—') {
+        prevChargeHint = `<span class="prev-session">S${wIdx}: ${h(prevCharge)} kg</span>`;
+      }
+    }
+
+    // Feature 1: rest timer defaults
+    const timerKey = h(ex.name);
+    const defaultSecs = timerDefaults[timerKey] || 90;
+
+    // Voice recording
+    const hasVoice = !!savedVoice[ex.name];
+    const voiceHtml = `
+      <div class="ex-voice" id="voice-${i}">
+        <span class="ex-voice-label">🎙 Coach</span>
+        <button class="voice-btn${hasVoice ? ' has-audio' : ''}" id="voice-rec-${i}"
+                onclick="toggleVoiceRecord(${i})">${hasVoice ? '● Ré-enregistrer' : '● Enregistrer'}</button>
+        ${hasVoice ? `<audio id="voice-audio-${i}" controls class="voice-audio-player"></audio>
+        <canvas class="voice-waveform" id="voice-wave-${i}" width="120" height="28"></canvas>
+        <button class="voice-delete-btn" onclick="deleteVoice(${i})" title="Supprimer">✕</button>` : ''}
+      </div>`;
 
     html += `
       <div class="exercise-card" id="ex-card-${i}">
@@ -245,11 +371,11 @@ function renderTraining() {
               <div class="ex-name editable"
                    contenteditable="true"
                    onblur="saveField(${currentDay},${i},'name',this)"
-                   title="Cliquez pour modifier">${ex.name}</div>
+                   title="Cliquez pour modifier">${h(ex.name)}</div>
               <div class="ex-tips editable"
                    contenteditable="true"
                    onblur="saveField(${currentDay},${i},'tips',this)"
-                   title="Conseils">${ex.tips || 'Ajouter des conseils…'}</div>
+                   title="Conseils">${h(ex.tips || 'Ajouter des conseils…')}</div>
             </div>
           </div>
           <div class="ex-actions">
@@ -260,38 +386,553 @@ function renderTraining() {
             <button class="ex-delete-btn" onclick="deleteExercise(${currentDay},${i})" title="Supprimer">✕</button>
           </div>
         </div>
+        ${voiceHtml}
         <div class="ex-metrics">
           <div class="metric">
             <span class="metric-label">Séries</span>
             <span class="metric-val editable"
                   contenteditable="true"
-                  onblur="saveWeekField(${currentDay},${i},${wIdx},'series',this)">${w.series ?? ''}</span>
+                  onblur="saveWeekField(${currentDay},${i},${wIdx},'series',this)">${h(String(w.series ?? ''))}</span>
           </div>
           <div class="metric">
             <span class="metric-label">Reps</span>
             <span class="metric-val editable"
                   contenteditable="true"
-                  onblur="saveWeekField(${currentDay},${i},${wIdx},'reps',this)">${w.reps ?? ''}</span>
+                  onblur="saveWeekField(${currentDay},${i},${wIdx},'reps',this)">${h(String(w.reps ?? ''))}</span>
           </div>
           <div class="metric">
             <span class="metric-label">Charge (kg)</span>
             <span class="metric-val editable"
                   contenteditable="true"
-                  onblur="saveWeekField(${currentDay},${i},${wIdx},'charge',this)">${w.charge ?? ''}</span>
+                  onblur="saveWeekField(${currentDay},${i},${wIdx},'charge',this)">${h(String(w.charge ?? ''))}</span>
+            ${prevChargeHint}
           </div>
           <div class="metric done-metric">
             <span class="metric-label">Réalisé</span>
             <span class="metric-val editable"
                   contenteditable="true"
-                  onblur="saveWeekField(${currentDay},${i},${wIdx},'done',this)">${w.done ?? ''}</span>
+                  onblur="saveWeekField(${currentDay},${i},${wIdx},'done',this)">${h(String(w.done ?? ''))}</span>
+            ${prevHint}
+          </div>
+        </div>
+        <div class="ex-timer" id="timer-${i}">
+          <div class="timer-left">
+            <div class="timer-label-row">
+              <span class="timer-label">Repos</span>
+              <input class="timer-input" type="number" min="5" max="600" value="${defaultSecs}"
+                     onchange="setTimerDefault(${i}, this.value)" title="Durée (sec)">
+            </div>
+            <div class="timer-btns-row">
+              <button class="timer-btn" id="timer-btn-${i}" onclick="toggleTimer(${i})">▶</button>
+              <button class="timer-reset" onclick="resetTimer(${i})" title="Reset">↺</button>
+            </div>
+          </div>
+          <div class="timer-right">
+            <span class="timer-sec" id="timer-val-${i}">${defaultSecs}</span><span class="timer-sec-unit">s</span>
           </div>
         </div>
       </div>`;
   });
 
-  html += '</div>';
+  // Workout feedback section for this day
+  const fbKey = currentDay + '_' + currentWeek;
+  const fb = workoutFeedback[fbKey] || { rating: 0, note: '', pain: [] };
+  const stars = [1,2,3,4,5].map(n =>
+    `<button class="star-btn${n <= fb.rating ? ' lit' : ''}" data-star="${n}" onclick="setFeedbackRating('${fbKey}',${n})">★</button>`
+  ).join('');
+
+  // "Séance terminée" button + saved summary card
+  const hasFeedback = fb.rating > 0 || (fb.note || '').trim() || (fb.pain || []).length;
+  const summaryStars = [1,2,3,4,5].map(n => `<span class="sum-star${n <= fb.rating ? ' lit' : ''}">★</span>`).join('');
+  html += `
+    </div>
+    <div class="seance-footer" id="seance-footer">
+      <button class="btn-seance-terminee" onclick="openBilanOverlay('${fbKey}')">
+        ${hasFeedback ? '✏️ Modifier le bilan' : '✅ Séance terminée'}
+      </button>
+      ${hasFeedback ? `
+      <div class="bilan-summary" id="bilan-summary">
+        <div class="bilan-summary-header">
+          <span class="bilan-summary-title">Bilan de la séance</span>
+          <div class="sum-stars">${summaryStars}</div>
+        </div>
+        ${fb.note ? `<p class="bilan-summary-note">${h(fb.note)}</p>` : ''}
+        ${(fb.pain||[]).length ? `<p class="bilan-summary-pain">🔴 ${fb.pain.length} zone${fb.pain.length > 1 ? 's' : ''} douloureuse${fb.pain.length > 1 ? 's' : ''} marquée${fb.pain.length > 1 ? 's' : ''}</p>` : ''}
+      </div>` : ''}
+    </div>`;
+
   grid.innerHTML = html;
+  // Set audio src and draw waveforms after render (DOM property — not attribute — to bypass security hook)
+  dayData.exercises.forEach((ex, i) => {
+    if (!savedVoice[ex.name]) return;
+    drawWaveform(i, ex.name);
+    const audioEl = document.getElementById('voice-audio-' + i);
+    if (audioEl) {
+      const dataUrl = savedVoice[ex.name];
+      try {
+        const [header, b64] = dataUrl.split(',');
+        const mime = header.match(/:(.*?);/)[1];
+        const bytes = atob(b64);
+        const buf = new Uint8Array(bytes.length);
+        for (let k = 0; k < bytes.length; k++) buf[k] = bytes.charCodeAt(k);
+        const blob = new Blob([buf], { type: mime });
+        audioEl.src = URL.createObjectURL(blob);
+      } catch (_) {
+        audioEl.src = dataUrl;
+      }
+    }
+  });
   updateKPIs();
+}
+
+// ============================================================
+// BODY SVG HELPERS (silhouette outlines)
+// ============================================================
+function _bodyFrontSVG() {
+  // Detailed front muscular anatomy — viewBox 0 0 100 230
+  return `<defs>
+    <radialGradient id="mg" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#4a4a4a"/>
+      <stop offset="100%" stop-color="#1e1e1e"/>
+    </radialGradient>
+    <radialGradient id="skinhi" cx="50%" cy="30%" r="55%">
+      <stop offset="0%" stop-color="#555" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#222" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- neck -->
+  <path class="bm-fill" d="M43,32 Q44,26 50,25 Q56,26 57,32 L56,38 Q50,40 44,38 Z"/>
+  <!-- head -->
+  <ellipse class="bm-fill" cx="50" cy="19" rx="12" ry="14.5"/>
+  <ellipse fill="url(#skinhi)" cx="50" cy="16" rx="9" ry="10" opacity="0.4"/>
+  <!-- trap left -->
+  <path class="bm-fill bm-muscle" d="M43,38 Q36,36 28,42 Q26,48 30,52 Q36,48 44,46 Z"/>
+  <!-- trap right -->
+  <path class="bm-fill bm-muscle" d="M57,38 Q64,36 72,42 Q74,48 70,52 Q64,48 56,46 Z"/>
+  <!-- left shoulder (deltoid) -->
+  <path class="bm-fill bm-muscle" d="M26,42 Q18,44 15,52 Q14,60 18,64 Q24,60 28,52 Z"/>
+  <!-- right shoulder (deltoid) -->
+  <path class="bm-fill bm-muscle" d="M74,42 Q82,44 85,52 Q86,60 82,64 Q76,60 72,52 Z"/>
+  <!-- chest left (pec) -->
+  <path class="bm-fill bm-muscle" d="M30,48 Q30,56 34,62 Q40,66 50,64 Q50,56 48,50 Q40,46 30,48 Z"/>
+  <!-- chest right (pec) -->
+  <path class="bm-fill bm-muscle" d="M70,48 Q70,56 66,62 Q60,66 50,64 Q50,56 52,50 Q60,46 70,48 Z"/>
+  <!-- pec divider line -->
+  <line x1="50" y1="48" x2="50" y2="64" stroke="#111" stroke-width="0.8" opacity="0.6"/>
+  <!-- sternum highlight -->
+  <line x1="50" y1="40" x2="50" y2="86" stroke="#666" stroke-width="0.6" opacity="0.4"/>
+  <!-- abs (6-pack) -->
+  <path class="bm-fill bm-muscle" d="M38,66 Q36,78 37,90 Q43,94 50,93 Q57,94 63,90 Q64,78 62,66 Q56,63 50,63 Q44,63 38,66 Z"/>
+  <!-- abs horizontal lines -->
+  <path fill="none" stroke="#1a1a1a" stroke-width="1" d="M39,72 Q50,74 61,72"/>
+  <path fill="none" stroke="#1a1a1a" stroke-width="1" d="M38,80 Q50,82 62,80"/>
+  <!-- abs vertical line -->
+  <line x1="50" y1="64" x2="50" y2="92" stroke="#111" stroke-width="1.2" opacity="0.7"/>
+  <!-- obliques left -->
+  <path class="bm-fill bm-muscle" d="M37,68 Q30,72 28,82 Q30,90 37,92 Q37,80 38,70 Z"/>
+  <!-- obliques right -->
+  <path class="bm-fill bm-muscle" d="M63,68 Q70,72 72,82 Q70,90 63,92 Q63,80 62,70 Z"/>
+  <!-- left upper arm (bicep) -->
+  <path class="bm-fill bm-muscle" d="M18,64 Q14,72 15,82 Q18,88 24,88 Q28,82 28,72 Q26,64 20,62 Z"/>
+  <!-- right upper arm (bicep) -->
+  <path class="bm-fill bm-muscle" d="M82,64 Q86,72 85,82 Q82,88 76,88 Q72,82 72,72 Q74,64 80,62 Z"/>
+  <!-- left forearm -->
+  <path class="bm-fill" d="M15,88 Q12,96 13,108 Q16,114 21,112 Q26,106 26,96 Q25,88 21,86 Z"/>
+  <!-- right forearm -->
+  <path class="bm-fill" d="M85,88 Q88,96 87,108 Q84,114 79,112 Q74,106 74,96 Q75,88 79,86 Z"/>
+  <!-- left hand -->
+  <ellipse class="bm-fill" cx="16" cy="116" rx="5" ry="7"/>
+  <!-- right hand -->
+  <ellipse class="bm-fill" cx="84" cy="116" rx="5" ry="7"/>
+  <!-- hip / lower torso -->
+  <path class="bm-fill" d="M37,91 Q32,94 30,100 Q32,108 38,110 Q44,112 50,112 Q56,112 62,110 Q68,108 70,100 Q68,94 63,91 Q56,93 50,93 Q44,93 37,91 Z"/>
+  <!-- left quad -->
+  <path class="bm-fill bm-muscle" d="M30,108 Q27,118 27,132 Q28,144 34,148 Q40,150 44,144 Q47,134 46,118 Q43,110 36,108 Z"/>
+  <!-- right quad -->
+  <path class="bm-fill bm-muscle" d="M70,108 Q73,118 73,132 Q72,144 66,148 Q60,150 56,144 Q53,134 54,118 Q57,110 64,108 Z"/>
+  <!-- quad inner left line -->
+  <path fill="none" class="bm-inner" d="M37,112 Q40,128 38,144"/>
+  <!-- quad inner right line -->
+  <path fill="none" class="bm-inner" d="M63,112 Q60,128 62,144"/>
+  <!-- left knee -->
+  <ellipse class="bm-fill" cx="35" cy="151" rx="9" ry="6"/>
+  <!-- right knee -->
+  <ellipse class="bm-fill" cx="65" cy="151" rx="9" ry="6"/>
+  <!-- left shin (tibia) -->
+  <path class="bm-fill" d="M28,157 Q26,170 27,184 Q30,190 35,190 Q40,190 42,184 Q43,170 41,157 Q38,154 34,155 Z"/>
+  <!-- right shin -->
+  <path class="bm-fill" d="M72,157 Q74,170 73,184 Q70,190 65,190 Q60,190 58,184 Q57,170 59,157 Q62,154 66,155 Z"/>
+  <!-- left foot -->
+  <ellipse class="bm-fill" cx="34" cy="194" rx="9" ry="5"/>
+  <!-- right foot -->
+  <ellipse class="bm-fill" cx="66" cy="194" rx="9" ry="5"/>
+  <!-- muscle highlight overlays -->
+  <ellipse fill="url(#skinhi)" cx="40" cy="56" rx="7" ry="8" opacity="0.25"/>
+  <ellipse fill="url(#skinhi)" cx="60" cy="56" rx="7" ry="8" opacity="0.25"/>
+  <ellipse fill="url(#skinhi)" cx="20" cy="72" rx="5" ry="7" opacity="0.2"/>
+  <ellipse fill="url(#skinhi)" cx="80" cy="72" rx="5" ry="7" opacity="0.2"/>`;
+}
+
+function _bodyBackSVG() {
+  // Detailed back muscular anatomy — viewBox 0 0 100 230
+  return `<defs>
+    <radialGradient id="mgb" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#4a4a4a"/>
+      <stop offset="100%" stop-color="#1e1e1e"/>
+    </radialGradient>
+  </defs>
+  <!-- head (back) -->
+  <ellipse class="bm-fill" cx="50" cy="19" rx="12" ry="14.5"/>
+  <!-- neck -->
+  <path class="bm-fill" d="M44,33 Q50,36 56,33 L57,38 Q50,41 43,38 Z"/>
+  <!-- trapezius (large diamond shape) -->
+  <path class="bm-fill bm-muscle" d="M44,38 Q36,40 28,50 Q26,58 30,62 Q38,60 44,54 Q48,50 50,50 Q52,50 56,54 Q62,60 70,62 Q74,58 72,50 Q64,40 56,38 Q53,37 50,37 Q47,37 44,38 Z"/>
+  <!-- trap center ridge -->
+  <line x1="50" y1="38" x2="50" y2="60" stroke="#1a1a1a" stroke-width="1.2" opacity="0.6"/>
+  <!-- left shoulder (rear deltoid) -->
+  <path class="bm-fill bm-muscle" d="M26,50 Q18,52 15,60 Q14,68 18,72 Q24,68 28,60 Z"/>
+  <!-- right shoulder (rear deltoid) -->
+  <path class="bm-fill bm-muscle" d="M74,50 Q82,52 85,60 Q86,68 82,72 Q76,68 72,60 Z"/>
+  <!-- left lat -->
+  <path class="bm-fill bm-muscle" d="M30,60 Q26,70 28,84 Q32,92 40,92 Q46,88 46,78 Q44,66 38,60 Z"/>
+  <!-- right lat -->
+  <path class="bm-fill bm-muscle" d="M70,60 Q74,70 72,84 Q68,92 60,92 Q54,88 54,78 Q56,66 62,60 Z"/>
+  <!-- spine line -->
+  <line x1="50" y1="38" x2="50" y2="100" stroke="#555" stroke-width="0.8" opacity="0.5"/>
+  <!-- lower back (erector spinae) -->
+  <path class="bm-fill bm-muscle" d="M40,84 Q38,92 38,100 Q42,104 50,104 Q58,104 62,100 Q62,92 60,84 Q55,86 50,86 Q45,86 40,84 Z"/>
+  <!-- erector ridges -->
+  <line x1="46" y1="86" x2="46" y2="102" stroke="#1a1a1a" stroke-width="0.8" opacity="0.6"/>
+  <line x1="54" y1="86" x2="54" y2="102" stroke="#1a1a1a" stroke-width="0.8" opacity="0.6"/>
+  <!-- glute left -->
+  <path class="bm-fill bm-muscle" d="M30,100 Q28,110 30,120 Q36,128 44,126 Q50,122 50,112 Q48,102 40,100 Z"/>
+  <!-- glute right -->
+  <path class="bm-fill bm-muscle" d="M70,100 Q72,110 70,120 Q64,128 56,126 Q50,122 50,112 Q52,102 60,100 Z"/>
+  <!-- glute divider -->
+  <line x1="50" y1="102" x2="50" y2="122" stroke="#111" stroke-width="1" opacity="0.6"/>
+  <!-- left upper arm (tricep) -->
+  <path class="bm-fill bm-muscle" d="M18,70 Q14,78 15,90 Q18,96 24,96 Q28,90 28,78 Q26,70 20,68 Z"/>
+  <!-- right upper arm (tricep) -->
+  <path class="bm-fill bm-muscle" d="M82,70 Q86,78 85,90 Q82,96 76,96 Q72,90 72,78 Q74,70 80,68 Z"/>
+  <!-- tricep horseshoe lines -->
+  <path fill="none" stroke="#1a1a1a" stroke-width="0.8" d="M19,76 Q21,86 19,92"/>
+  <path fill="none" stroke="#1a1a1a" stroke-width="0.8" d="M81,76 Q79,86 81,92"/>
+  <!-- left forearm (back) -->
+  <path class="bm-fill" d="M15,96 Q12,106 13,116 Q16,122 21,120 Q26,114 26,104 Q25,96 21,94 Z"/>
+  <!-- right forearm (back) -->
+  <path class="bm-fill" d="M85,96 Q88,106 87,116 Q84,122 79,120 Q74,114 74,104 Q75,96 79,94 Z"/>
+  <!-- left hand -->
+  <ellipse class="bm-fill" cx="16" cy="124" rx="5" ry="7"/>
+  <!-- right hand -->
+  <ellipse class="bm-fill" cx="84" cy="124" rx="5" ry="7"/>
+  <!-- left hamstring -->
+  <path class="bm-fill bm-muscle" d="M30,124 Q27,136 28,150 Q30,158 36,160 Q42,160 44,152 Q46,140 44,128 Q40,122 34,122 Z"/>
+  <!-- right hamstring -->
+  <path class="bm-fill bm-muscle" d="M70,124 Q73,136 72,150 Q70,158 64,160 Q58,160 56,152 Q54,140 56,128 Q60,122 66,122 Z"/>
+  <!-- ham divider lines -->
+  <path fill="none" class="bm-inner" d="M34,128 Q36,142 34,156"/>
+  <path fill="none" class="bm-inner" d="M66,128 Q64,142 66,156"/>
+  <!-- left knee (back) -->
+  <ellipse class="bm-fill" cx="35" cy="163" rx="9" ry="6"/>
+  <!-- right knee (back) -->
+  <ellipse class="bm-fill" cx="65" cy="163" rx="9" ry="6"/>
+  <!-- left calf -->
+  <path class="bm-fill bm-muscle" d="M28,169 Q26,180 27,190 Q30,196 35,196 Q40,196 42,190 Q43,178 41,169 Q38,166 34,166 Z"/>
+  <!-- right calf -->
+  <path class="bm-fill bm-muscle" d="M72,169 Q74,180 73,190 Q70,196 65,196 Q60,196 58,190 Q57,178 59,169 Q62,166 66,166 Z"/>
+  <!-- calf medial line left -->
+  <path fill="none" class="bm-inner" d="M34,170 Q36,180 34,190"/>
+  <!-- calf medial line right -->
+  <path fill="none" class="bm-inner" d="M66,170 Q64,180 66,190"/>
+  <!-- left foot -->
+  <ellipse class="bm-fill" cx="34" cy="200" rx="9" ry="5"/>
+  <!-- right foot -->
+  <ellipse class="bm-fill" cx="66" cy="200" rx="9" ry="5"/>
+  <!-- highlight overlays -->
+  <ellipse fill="#666" cx="37" cy="68" rx="6" ry="9" opacity="0.15"/>
+  <ellipse fill="#666" cx="63" cy="68" rx="6" ry="9" opacity="0.15"/>
+  <ellipse fill="#666" cx="50" cy="52" rx="8" ry="8" opacity="0.1"/>`;
+}
+
+// ============================================================
+// WORKOUT FEEDBACK
+// ============================================================
+function setFeedbackRating(fbKey, n) {
+  if (!workoutFeedback[fbKey]) workoutFeedback[fbKey] = { rating: 0, note: '', pain: [] };
+  workoutFeedback[fbKey].rating = n;
+  localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+  document.querySelectorAll('#star-row .star-btn').forEach(btn => {
+    btn.classList.toggle('lit', parseInt(btn.dataset.star) <= n);
+  });
+}
+
+function saveFeedbackNote(fbKey, el) {
+  if (!workoutFeedback[fbKey]) workoutFeedback[fbKey] = { rating: 0, note: '', pain: [] };
+  workoutFeedback[fbKey].note = el.value;
+  localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+}
+
+function addPainDot(event, fbKey, view) {
+  const svg = event.currentTarget;
+  const rect = svg.getBoundingClientRect();
+  const vb = svg.viewBox.baseVal;
+  const scaleX = vb.width / rect.width;
+  const scaleY = vb.height / rect.height;
+  const x = Math.round((event.clientX - rect.left) * scaleX);
+  const y = Math.round((event.clientY - rect.top) * scaleY);
+  if (!workoutFeedback[fbKey]) workoutFeedback[fbKey] = { rating: 0, note: '', pain: [] };
+  workoutFeedback[fbKey].pain = workoutFeedback[fbKey].pain || [];
+  workoutFeedback[fbKey].pain.push({ view, x, y });
+  localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+  // Add dot directly to SVG without full re-render
+  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  circle.setAttribute('class', 'pain-dot');
+  circle.setAttribute('cx', x); circle.setAttribute('cy', y); circle.setAttribute('r', '5');
+  svg.appendChild(circle);
+}
+
+function clearPain(fbKey) {
+  if (!workoutFeedback[fbKey]) return;
+  workoutFeedback[fbKey].pain = [];
+  localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+  document.querySelectorAll('.pain-dot').forEach(d => d.remove());
+}
+
+// ============================================================
+// BILAN OVERLAY
+// ============================================================
+function openBilanOverlay(fbKey) {
+  if (document.getElementById('bilan-overlay')) return;
+  const fb = workoutFeedback[fbKey] || { rating: 0, note: '', pain: [] };
+
+  const overlay = document.createElement('div');
+  overlay.id = 'bilan-overlay';
+  overlay.className = 'bilan-overlay';
+
+  const box = document.createElement('div');
+  box.className = 'bilan-overlay-box';
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'bilan-overlay-header';
+  const title = document.createElement('h3');
+  title.textContent = 'Bilan de la séance';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'bilan-overlay-close';
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', () => overlay.remove());
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+
+  // Rating
+  const ratingWrap = document.createElement('div');
+  ratingWrap.className = 'feedback-rating';
+  const ratingLabel = document.createElement('label');
+  ratingLabel.textContent = 'Comment tu t\'es senti ?';
+  const starRow = document.createElement('div');
+  starRow.className = 'star-row';
+  starRow.id = 'overlay-star-row';
+  [1,2,3,4,5].forEach(n => {
+    const btn = document.createElement('button');
+    btn.className = 'star-btn' + (n <= fb.rating ? ' lit' : '');
+    btn.textContent = '★';
+    btn.dataset.star = n;
+    btn.addEventListener('click', () => {
+      fb.rating = n;
+      starRow.querySelectorAll('.star-btn').forEach(b => b.classList.toggle('lit', parseInt(b.dataset.star) <= n));
+    });
+    starRow.appendChild(btn);
+  });
+  ratingWrap.appendChild(ratingLabel);
+  ratingWrap.appendChild(starRow);
+
+  // Note
+  const note = document.createElement('textarea');
+  note.className = 'feedback-note';
+  note.placeholder = 'Notes sur la séance, sensations, observations…';
+  note.value = fb.note || '';
+
+  // Pain map
+  const painLabel = document.createElement('div');
+  painLabel.className = 'feedback-body-label';
+  painLabel.textContent = 'Zones douloureuses — cliquer pour marquer';
+
+  const bodyWrap = document.createElement('div');
+  bodyWrap.className = 'feedback-body-wrap';
+
+  ['front','back'].forEach(view => {
+    const wrap = document.createElement('div');
+    wrap.className = 'body-canvas-wrap';
+    const lbl = document.createElement('span');
+    lbl.textContent = view === 'front' ? 'Avant' : 'Arrière';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'body-svg');
+    svg.setAttribute('viewBox', '0 0 100 210');
+    svg.innerHTML = (view === 'front' ? _bodyFrontSVG() : _bodyBackSVG());
+    (fb.pain || []).filter(p => p.view === view).forEach(p => {
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('class', 'pain-dot'); c.setAttribute('cx', p.x); c.setAttribute('cy', p.y); c.setAttribute('r', '5');
+      svg.appendChild(c);
+    });
+    svg.addEventListener('click', e => {
+      const rect = svg.getBoundingClientRect();
+      const vb = svg.viewBox.baseVal;
+      const x = Math.round((e.clientX - rect.left) * vb.width / rect.width);
+      const y = Math.round((e.clientY - rect.top) * vb.height / rect.height);
+      fb.pain = fb.pain || [];
+      fb.pain.push({ view, x, y });
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('class', 'pain-dot'); c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', '5');
+      svg.appendChild(c);
+    });
+    wrap.appendChild(lbl);
+    wrap.appendChild(svg);
+    bodyWrap.appendChild(wrap);
+  });
+
+  const painControls = document.createElement('div');
+  painControls.className = 'feedback-body-controls';
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'btn-clear-pain';
+  clearBtn.textContent = 'Effacer les zones';
+  clearBtn.addEventListener('click', () => {
+    fb.pain = [];
+    bodyWrap.querySelectorAll('.pain-dot').forEach(d => d.remove());
+  });
+  painControls.appendChild(clearBtn);
+
+  // Save button
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'btn-primary btn-bilan-save';
+  saveBtn.textContent = 'Enregistrer & fermer';
+  saveBtn.addEventListener('click', () => {
+    fb.note = note.value;
+    workoutFeedback[fbKey] = fb;
+    localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+    overlay.remove();
+    renderTraining(); // re-render so summary card appears
+  });
+
+  const scrollBody = document.createElement('div');
+  scrollBody.className = 'bilan-overlay-scroll';
+  scrollBody.appendChild(ratingWrap);
+  scrollBody.appendChild(note);
+  scrollBody.appendChild(painLabel);
+  scrollBody.appendChild(bodyWrap);
+  scrollBody.appendChild(painControls);
+  scrollBody.appendChild(saveBtn);
+
+  box.appendChild(header);
+  box.appendChild(scrollBody);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  // Close on backdrop click
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+// ============================================================
+// VOICE RECORDING
+// ============================================================
+function toggleVoiceRecord(idx) {
+  if (_recState[idx] && _recState[idx].recording) {
+    _stopVoiceRecord(idx);
+  } else {
+    _startVoiceRecord(idx);
+  }
+}
+
+// Pick the best supported MIME type for the current browser/device
+function _bestAudioMime() {
+  const candidates = [
+    'audio/mp4;codecs=mp4a.40.2', // iOS Safari
+    'audio/mp4',
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+  ];
+  for (const t of candidates) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return ''; // browser default
+}
+
+function _startVoiceRecord(idx) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert('Microphone non disponible sur cet appareil.');
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    const mime = _bestAudioMime();
+    const chunks = [];
+    const mr = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    const actualMime = mr.mimeType || mime || 'audio/webm';
+    mr.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+    mr.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(chunks, { type: actualMime });
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dayData = trainingData.days[currentDay];
+        if (!dayData || !dayData.exercises[idx]) return;
+        const exName = dayData.exercises[idx].name;
+        savedVoice[exName] = reader.result;
+        localStorage.setItem(pk('voice'), JSON.stringify(savedVoice));
+        renderTraining();
+      };
+      reader.readAsDataURL(blob);
+    };
+    mr.start();
+    _recState[idx] = { recording: true, mr, stream };
+    const btn = document.getElementById('voice-rec-' + idx);
+    if (btn) { btn.textContent = '■ Arrêter'; btn.classList.add('recording'); }
+  }).catch(err => {
+    const msg = err && err.name === 'NotAllowedError'
+      ? 'Accès au microphone refusé. Vérifie les permissions dans les réglages.'
+      : 'Microphone non accessible : ' + (err && err.message || err);
+    alert(msg);
+  });
+}
+
+function _stopVoiceRecord(idx) {
+  const s = _recState[idx];
+  if (!s) return;
+  s.mr.stop();
+  s.recording = false;
+}
+
+
+function deleteVoice(idx) {
+  const dayData = trainingData.days[currentDay];
+  if (!dayData || !dayData.exercises[idx]) return;
+  const exName = dayData.exercises[idx].name;
+  delete savedVoice[exName];
+  localStorage.setItem(pk('voice'), JSON.stringify(savedVoice));
+  renderTraining();
+}
+
+function drawWaveform(idx, exName) {
+  const canvas = document.getElementById('voice-wave-' + idx);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dataUrl = savedVoice[exName];
+  if (!dataUrl) return;
+  // Draw a static decorative waveform to indicate audio exists
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#C8FF00';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  const bars = 24;
+  const w = canvas.width / bars;
+  const mid = canvas.height / 2;
+  const seed = exName.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+  for (let i = 0; i < bars; i++) {
+    const amp = (((seed * (i + 7) * 13) % 17) / 17) * (mid - 2) + 2;
+    const x = i * w + w / 2;
+    ctx.moveTo(x, mid - amp); ctx.lineTo(x, mid + amp);
+  }
+  ctx.stroke();
 }
 
 // ============================================================
@@ -318,6 +959,105 @@ function saveWeekField(dayId, exIdx, wIdx, field, el) {
   weeks[wIdx][field] = val;
   persistTraining();
   updateKPIs();
+}
+
+// ============================================================
+// REST TIMER (Feature 1)
+// ============================================================
+function setTimerDefault(idx, val) {
+  const secs = Math.max(5, Math.min(600, parseInt(val) || 90));
+  const dayData = trainingData.days[currentDay];
+  if (!dayData || !dayData.exercises[idx]) return;
+  const exName = dayData.exercises[idx].name;
+  timerDefaults[exName] = secs;
+  localStorage.setItem(pk('timers'), JSON.stringify(timerDefaults));
+  // update display if timer is not running
+  if (!timerState[idx] || !timerState[idx].running) {
+    const valEl = document.getElementById('timer-val-' + idx);
+    if (valEl) valEl.textContent = secs;
+    if (timerState[idx]) timerState[idx].remaining = secs;
+  }
+}
+
+function toggleTimer(idx) {
+  if (!timerState[idx]) {
+    const dayData = trainingData.days[currentDay];
+    const exName = dayData && dayData.exercises[idx] ? dayData.exercises[idx].name : '';
+    const defaultSecs = timerDefaults[exName] || 90;
+    timerState[idx] = { remaining: defaultSecs, running: false, interval: null };
+  }
+  const state = timerState[idx];
+  if (state.running) {
+    // Pause
+    clearInterval(state.interval);
+    state.interval = null;
+    state.running = false;
+    const btn = document.getElementById('timer-btn-' + idx);
+    if (btn) { btn.textContent = '▶'; btn.classList.remove('running'); }
+  } else {
+    // Start
+    const valEl = document.getElementById('timer-val-' + idx);
+    if (valEl) valEl.classList.remove('done');
+    state.running = true;
+    const btn = document.getElementById('timer-btn-' + idx);
+    if (btn) { btn.textContent = '⏸'; btn.classList.add('running'); }
+    state.interval = setInterval(() => {
+      state.remaining--;
+      const el = document.getElementById('timer-val-' + idx);
+      if (el) el.textContent = Math.max(0, state.remaining);
+      if (state.remaining <= 0) {
+        clearInterval(state.interval);
+        state.interval = null;
+        state.running = false;
+        const b = document.getElementById('timer-btn-' + idx);
+        if (b) { b.textContent = '▶'; b.classList.remove('running'); }
+        if (el) { el.textContent = 'Repos terminé!'; el.classList.add('done'); }
+        playBeep();
+      }
+    }, 1000);
+  }
+}
+
+function resetTimer(idx) {
+  if (timerState[idx]) {
+    clearInterval(timerState[idx].interval);
+    timerState[idx].interval = null;
+    timerState[idx].running = false;
+  }
+  const dayData = trainingData.days[currentDay];
+  const exName = dayData && dayData.exercises[idx] ? dayData.exercises[idx].name : '';
+  const defaultSecs = timerDefaults[exName] || 90;
+  if (timerState[idx]) timerState[idx].remaining = defaultSecs;
+  const valEl = document.getElementById('timer-val-' + idx);
+  if (valEl) { valEl.textContent = defaultSecs; valEl.classList.remove('done'); }
+  const btn = document.getElementById('timer-btn-' + idx);
+  if (btn) { btn.textContent = '▶'; btn.classList.remove('running'); }
+}
+
+function stopAllTimers() {
+  Object.values(timerState).forEach(state => {
+    if (state && state.interval) {
+      clearInterval(state.interval);
+      state.interval = null;
+    }
+  });
+  timerState = {};
+}
+
+function playBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.4, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.6);
+  } catch(e) { /* audio not available */ }
 }
 
 // ============================================================
@@ -370,11 +1110,6 @@ function openExerciseModal(dayId, exIdx) {
   currentExercise = ex.name;
   document.getElementById('modal-exercise-name').textContent = ex.name;
   document.getElementById('modal-exercise-tips').textContent = ex.tips || '';
-  document.getElementById('modal-series').textContent = w.series ?? '—';
-  document.getElementById('modal-reps').textContent   = w.reps   ?? '—';
-  document.getElementById('modal-charge').textContent = w.charge != null ? w.charge + ' kg' : '—';
-  document.getElementById('modal-done').textContent   = w.done   || '—';
-  document.getElementById('modal-notes').value = savedNotes[ex.name] || '';
 
   const video = document.getElementById('exercise-video');
   const placeholder = document.getElementById('video-placeholder');
@@ -584,6 +1319,183 @@ function initCharts() {
   makeChart('chart-eau',     "Volume d'eau (%)",       'eau',     chartColors.eau);
   makeChart('chart-muscle',  'Masse musculaire (kg)',  'muscle',  chartColors.muscle);
   updateExerciseChart();
+  updateVolumeChart();
+  updateVolumeStackedChart();
+  renderBilanHistory();
+}
+
+function renderBilanHistory() {
+  const section = document.getElementById('bilan-history-section');
+  if (!section) return;
+
+  // Collect all feedback entries sorted by week then day
+  const entries = Object.entries(workoutFeedback)
+    .filter(([, fb]) => fb && (fb.rating > 0 || (fb.note || '').trim() || (fb.pain || []).length))
+    .map(([key, fb]) => {
+      const parts = key.split('_'); // "day_week"
+      return { day: parseInt(parts[0]) || 0, week: parseInt(parts[1]) || 0, key, fb };
+    })
+    .sort((a, b) => a.week !== b.week ? a.week - b.week : a.day - b.day);
+
+  section.innerHTML = '';
+  if (!entries.length) return;
+
+  // --- Section wrapper ---
+  const wrap = document.createElement('div');
+  wrap.className = 'bilan-history-wrap';
+
+  const titleRow = document.createElement('div');
+  titleRow.className = 'bilan-history-title-row';
+  const titleEl = document.createElement('h2');
+  titleEl.textContent = 'Historique des bilans';
+  titleRow.appendChild(titleEl);
+  wrap.appendChild(titleRow);
+
+  // --- Rating trend chart ---
+  const chartWrap = document.createElement('div');
+  chartWrap.className = 'graph-card full-width bilan-trend-card';
+  const chartTitle = document.createElement('h3');
+  chartTitle.textContent = 'Évolution du ressenti (étoiles)';
+  const canvas = document.createElement('canvas');
+  canvas.id = 'chart-bilan-trend';
+  chartWrap.appendChild(chartTitle);
+  chartWrap.appendChild(canvas);
+  wrap.appendChild(chartWrap);
+
+  const ratedEntries = entries.filter(e => e.fb.rating > 0);
+  const trendLabels = ratedEntries.map(e => `S${e.week} J${e.day}`);
+  const trendData   = ratedEntries.map(e => e.fb.rating);
+
+  if (charts['chart-bilan-trend']) charts['chart-bilan-trend'].destroy();
+  charts['chart-bilan-trend'] = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: trendLabels,
+      datasets: [{
+        label: 'Ressenti (/ 5)',
+        data: trendData,
+        borderColor: '#C8FF00',
+        backgroundColor: 'rgba(200,255,0,0.12)',
+        pointBackgroundColor: trendData.map(v =>
+          v >= 4 ? '#C8FF00' : v === 3 ? '#FFB800' : '#ff6666'),
+        pointRadius: 6,
+        pointHoverRadius: 8,
+        tension: 0.3,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: '#ccc' } },
+        tooltip: {
+          callbacks: {
+            label: ctx => '★'.repeat(ctx.parsed.y) + '☆'.repeat(5 - ctx.parsed.y)
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y: { min: 0, max: 5, ticks: { color: '#aaa', stepSize: 1,
+               callback: v => v === 0 ? '' : '★'.repeat(v) },
+             grid: { color: 'rgba(255,255,255,0.07)' } }
+      }
+    }
+  });
+
+  // --- Cards timeline ---
+  const timeline = document.createElement('div');
+  timeline.className = 'bilan-timeline';
+
+  entries.forEach(({ day, week, fb }) => {
+    const card = document.createElement('div');
+    card.className = 'bilan-hist-card';
+
+    // Header row
+    const cardHead = document.createElement('div');
+    cardHead.className = 'bhc-head';
+
+    const label = document.createElement('span');
+    label.className = 'bhc-label';
+    label.textContent = `Semaine ${week} — Jour ${day}`;
+
+    const stars = document.createElement('div');
+    stars.className = 'bhc-stars';
+    for (let n = 1; n <= 5; n++) {
+      const s = document.createElement('span');
+      s.className = 'bhc-star' + (n <= fb.rating ? ' lit' : '');
+      s.textContent = '★';
+      stars.appendChild(s);
+    }
+    cardHead.appendChild(label);
+    cardHead.appendChild(stars);
+    card.appendChild(cardHead);
+
+    // Toggle body
+    const body = document.createElement('div');
+    body.className = 'bhc-body';
+
+    if ((fb.note || '').trim()) {
+      const note = document.createElement('p');
+      note.className = 'bhc-note';
+      note.textContent = fb.note.trim();
+      body.appendChild(note);
+    }
+
+    if ((fb.pain || []).length) {
+      const painSect = document.createElement('div');
+      painSect.className = 'bhc-pain-sect';
+
+      const painTitle = document.createElement('span');
+      painTitle.className = 'bhc-pain-title';
+      painTitle.textContent = `🔴 ${fb.pain.length} zone${fb.pain.length > 1 ? 's' : ''} douloureuse${fb.pain.length > 1 ? 's' : ''}`;
+      painSect.appendChild(painTitle);
+
+      const svgRow = document.createElement('div');
+      svgRow.className = 'bhc-svg-row';
+
+      ['front','back'].forEach(view => {
+        const viewPain = fb.pain.filter(p => p.view === view);
+        if (!viewPain.length) return;
+        const svgWrap = document.createElement('div');
+        svgWrap.className = 'bhc-svg-wrap';
+        const lbl = document.createElement('span');
+        lbl.textContent = view === 'front' ? 'Avant' : 'Arrière';
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'body-svg bhc-svg');
+        svg.setAttribute('viewBox', '0 0 100 210');
+        svg.innerHTML = (view === 'front' ? _bodyFrontSVG() : _bodyBackSVG());
+        viewPain.forEach(p => {
+          const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          c.setAttribute('class', 'pain-dot');
+          c.setAttribute('cx', p.x); c.setAttribute('cy', p.y); c.setAttribute('r', '5');
+          svg.appendChild(c);
+        });
+        svgWrap.appendChild(lbl);
+        svgWrap.appendChild(svg);
+        svgRow.appendChild(svgWrap);
+      });
+
+      painSect.appendChild(svgRow);
+      body.appendChild(painSect);
+    }
+
+    // Collapse/expand toggle
+    let open = false;
+    cardHead.style.cursor = 'pointer';
+    body.style.display = 'none';
+    cardHead.addEventListener('click', () => {
+      open = !open;
+      body.style.display = open ? 'block' : 'none';
+      card.classList.toggle('bhc-open', open);
+    });
+
+    card.appendChild(body);
+    timeline.appendChild(card);
+  });
+
+  wrap.appendChild(timeline);
+  section.appendChild(wrap);
 }
 
 function addDataEntry() {
@@ -647,7 +1559,7 @@ function selectNutDay(day, btn) {
 function renderMeals() {
   const grid = document.getElementById('meals-grid');
   let html = '';
-  nutritionData.meals.forEach(meal => {
+  nutritionData.meals.forEach((meal, mealIdx) => {
     const savedOpt = mealOptions[currentNutDay + '_' + meal.id] || 0;
     const opt = meal.options[savedOpt];
     const totals = opt.items.reduce((acc, it) => ({
@@ -656,21 +1568,46 @@ function renderMeals() {
     }), { p:0, g:0, l:0, kcal:0 });
 
     const optBtns = meal.options.map((o, i) =>
-      `<button class="opt-btn ${i === savedOpt ? 'active' : ''}" onclick="selectMealOption('${currentNutDay}',${meal.id},${i},this)">${o.label}</button>`
+      `<button class="opt-btn ${i === savedOpt ? 'active' : ''}" onclick="selectMealOption('${h(currentNutDay)}',${meal.id},${i},this)">${h(o.label)}</button>`
     ).join('');
 
-    const itemRows = opt.items.map(it =>
-      `<tr>
-        <td>${it.food}</td><td>${it.qty}</td>
-        <td>${it.p}g</td><td>${it.g}g</td><td>${it.l}g</td><td>${it.kcal}</td>
-      </tr>`
+    // Feature 3 + 4: editable rows with per-item checkmarks + delete
+    const itemRows = opt.items.map((it, itIdx) => {
+      const ck = currentNutDay + '_' + meal.id + '_' + itIdx;
+      const checked = mealChecks[ck] || false;
+      return `<tr class="${checked ? 'row-checked' : ''}">
+        <td contenteditable="true" onblur="saveNutCell(${mealIdx},${savedOpt},${itIdx},'food',this)">${h(String(it.food))}</td>
+        <td contenteditable="true" onblur="saveNutCell(${mealIdx},${savedOpt},${itIdx},'qty',this)">${h(String(it.qty))}</td>
+        <td contenteditable="true" onblur="saveNutCell(${mealIdx},${savedOpt},${itIdx},'p',this)">${h(String(it.p))}g</td>
+        <td contenteditable="true" onblur="saveNutCell(${mealIdx},${savedOpt},${itIdx},'g',this)">${h(String(it.g))}g</td>
+        <td contenteditable="true" onblur="saveNutCell(${mealIdx},${savedOpt},${itIdx},'l',this)">${h(String(it.l))}g</td>
+        <td contenteditable="true" onblur="saveNutCell(${mealIdx},${savedOpt},${itIdx},'kcal',this)">${h(String(it.kcal))}</td>
+        <td class="row-check-cell">
+          <button class="row-check-btn${checked ? ' checked' : ''}" onclick="toggleItemCheck('${h(currentNutDay)}',${meal.id},${itIdx})" title="Consommé">✓</button>
+          <button class="row-delete-btn" onclick="deleteNutRow(${mealIdx},${savedOpt},${itIdx})" title="Supprimer">✕</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    // Feature 5: shopping list (editable)
+    const shopKey = currentNutDay + '_' + meal.id + '_shop';
+    // Use saved custom shopping list if present, else build from items
+    let shopEntries = JSON.parse(localStorage.getItem(pk('shop_' + shopKey)) || 'null');
+    if (!shopEntries) {
+      shopEntries = opt.items
+        .filter(it => it.food && it.qty && String(it.qty).toLowerCase() !== 'à volonté')
+        .map(it => `${it.food} — ${it.qty}`);
+    }
+    const shoppingItems = shopEntries.map((entry, sIdx) =>
+      `<li contenteditable="true" onblur="saveShopItem('${h(currentNutDay)}',${meal.id},${sIdx},this)">${h(String(entry))}</li>`
     ).join('');
+    const shoppingText = shopEntries.map(e => '• ' + e).join('\n');
 
     html += `
       <div class="meal-card">
         <div class="meal-header">
-          <span class="meal-icon">${meal.icon}</span>
-          <span class="meal-type">${meal.type}</span>
+          <span class="meal-icon" contenteditable="true" onblur="saveNutMealField(${mealIdx},'icon',this)">${h(meal.icon)}</span>
+          <span class="meal-type" contenteditable="true" onblur="saveNutMealField(${mealIdx},'type',this)">${h(meal.type)}</span>
           <div class="meal-macros-mini">
             <span>${Math.round(totals.p)}g P</span>
             <span>${Math.round(totals.g)}g G</span>
@@ -680,18 +1617,617 @@ function renderMeals() {
         </div>
         <div class="meal-options-bar">${optBtns}</div>
         <table class="meal-table">
-          <thead><tr><th>Aliment</th><th>Qté</th><th>P</th><th>G</th><th>L</th><th>kcal</th></tr></thead>
+          <thead><tr>
+            <th contenteditable="true">Aliment</th>
+            <th contenteditable="true">Qté</th>
+            <th contenteditable="true">P</th>
+            <th contenteditable="true">G</th>
+            <th contenteditable="true">L</th>
+            <th contenteditable="true">kcal</th>
+            <th></th>
+          </tr></thead>
           <tbody>${itemRows}</tbody>
         </table>
+        <button class="nut-add-row-btn" onclick="addNutRow(${mealIdx},${savedOpt})">+ Aliment</button>
       </div>`;
   });
+
+  // Unified shopping list — aggregate all meals for the current day
+  html += _buildUnifiedShoppingHtml(currentNutDay);
+
   grid.innerHTML = html;
+}
+
+// Build aggregated shopping list HTML for a given day
+function _buildUnifiedShoppingHtml(day) {
+  // Aggregate quantities across all meals for this day
+  // Map: normalised food name → { display, qty (number), unit, hasNonNumeric }
+  const agg = new Map();
+
+  nutritionData.meals.forEach((meal, mealIdx) => {
+    const savedOpt = mealOptions[day + '_' + meal.id] || 0;
+    const opt = meal.options[savedOpt] || meal.options[0];
+    if (!opt) return;
+
+    // Check if there's a custom saved shop list for this meal
+    const shopKey = day + '_' + meal.id + '_shop';
+    const customEntries = JSON.parse(localStorage.getItem(pk('shop_' + shopKey)) || 'null');
+
+    if (customEntries) {
+      // Parse "Food — qty unit" format from custom entries
+      customEntries.forEach(entry => {
+        const str = String(entry).trim();
+        if (!str) return;
+        const dashIdx = str.indexOf('—');
+        const food = (dashIdx > -1 ? str.slice(0, dashIdx) : str).trim();
+        const qtyStr = dashIdx > -1 ? str.slice(dashIdx + 1).trim() : '';
+        _aggAdd(agg, food, qtyStr);
+      });
+    } else {
+      opt.items.filter(it => it.food && it.qty && String(it.qty).toLowerCase() !== 'à volonté')
+        .forEach(it => _aggAdd(agg, String(it.food).trim(), String(it.qty).trim()));
+    }
+  });
+
+  if (!agg.size) return '';
+
+  // Build DOM-safe list items
+  const liItems = Array.from(agg.values()).map(entry => {
+    const qty = entry.hasNonNumeric
+      ? entry.rawQtys.join(' + ')
+      : (entry.qty % 1 === 0 ? entry.qty : Math.round(entry.qty * 10) / 10) + (entry.unit ? ' ' + entry.unit : '');
+    return `<li class="unified-shop-item" data-food="${h(entry.display)}">`
+      + `<span class="ush-food">${h(entry.display)}</span>`
+      + `<span class="ush-qty">${h(qty)}</span>`
+      + `</li>`;
+  }).join('');
+
+  return `
+    <div class="unified-shopping-list" id="unified-shop-list">
+      <div class="ush-header">
+        <span class="ush-title">🛒 Liste de courses</span>
+        <button class="btn-secondary ush-copy-btn" onclick="copyUnifiedShoppingList()">Copier</button>
+      </div>
+      <ul class="ush-items">${liItems}</ul>
+    </div>`;
+}
+
+// Aggregate helper — parse qty string and add to map
+function _aggAdd(agg, food, qtyStr) {
+  if (!food) return;
+  const key = food.toLowerCase().replace(/\s+/g, ' ');
+  const match = qtyStr.match(/^([\d.,]+)\s*(.*)$/);
+  const num = match ? parseFloat(match[1].replace(',', '.')) : NaN;
+  const unit = match ? match[2].trim().toLowerCase() : '';
+
+  if (!agg.has(key)) {
+    agg.set(key, { display: food, qty: 0, unit, hasNonNumeric: false, rawQtys: [] });
+  }
+  const entry = agg.get(key);
+  if (!isNaN(num)) {
+    entry.qty += num;
+    // Keep the unit from the first numeric entry
+    if (!entry.unit && unit) entry.unit = unit;
+  } else if (qtyStr) {
+    entry.hasNonNumeric = true;
+    if (!entry.rawQtys.includes(qtyStr)) entry.rawQtys.push(qtyStr);
+  }
+}
+
+// Copy unified shopping list to clipboard
+function copyUnifiedShoppingList() {
+  const ul = document.getElementById('unified-shop-list');
+  if (!ul) return;
+  const lines = Array.from(ul.querySelectorAll('.unified-shop-item')).map(li => {
+    const food = li.querySelector('.ush-food').textContent.trim();
+    const qty  = li.querySelector('.ush-qty').textContent.trim();
+    return '• ' + food + (qty ? ' — ' + qty : '');
+  });
+  const text = lines.join('\n');
+  const btn = ul.querySelector('.ush-copy-btn');
+  const reset = () => { if (btn) btn.textContent = 'Copier'; };
+  navigator.clipboard.writeText(text)
+    .then(() => { if (btn) { btn.textContent = '✓ Copié!'; setTimeout(reset, 1500); } })
+    .catch(() => {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+      if (btn) { btn.textContent = '✓ Copié!'; setTimeout(reset, 1500); }
+    });
 }
 
 function selectMealOption(day, mealId, optIdx) {
   mealOptions[day + '_' + mealId] = optIdx;
   localStorage.setItem(pk('meals'), JSON.stringify(mealOptions));
   renderMeals();
+}
+
+// Feature 3: save editable nutrition cell
+function saveNutCell(mealIdx, optIdx, itemIdx, field, el) {
+  const raw = el.textContent.replace(/g$/, '').trim();
+  const num = parseFloat(raw);
+  const val = (field !== 'food' && field !== 'qty' && !isNaN(num)) ? num : raw;
+  nutritionData.meals[mealIdx].options[optIdx].items[itemIdx][field] = val;
+  localStorage.setItem(pk('nutData'), JSON.stringify(nutritionData.meals));
+}
+
+// Feature 3: save editable meal header field (type or icon)
+function saveNutMealField(mealIdx, field, el) {
+  nutritionData.meals[mealIdx][field] = el.textContent.trim();
+  localStorage.setItem(pk('nutData'), JSON.stringify(nutritionData.meals));
+}
+
+// Add a blank food row to a meal option
+function addNutRow(mealIdx, optIdx) {
+  nutritionData.meals[mealIdx].options[optIdx].items.push({ food: '', qty: '', p: 0, g: 0, l: 0, kcal: 0 });
+  localStorage.setItem(pk('nutData'), JSON.stringify(nutritionData.meals));
+  renderMeals();
+  // Focus the new food cell
+  setTimeout(() => {
+    const tables = document.querySelectorAll('.meal-table');
+    const table = tables[mealIdx];
+    if (table) {
+      const rows = table.querySelectorAll('tbody tr');
+      const last = rows[rows.length - 1];
+      if (last) { const cell = last.querySelector('td[contenteditable]'); if (cell) cell.focus(); }
+    }
+  }, 40);
+}
+
+// Delete a food row from a meal option
+function deleteNutRow(mealIdx, optIdx, itIdx) {
+  nutritionData.meals[mealIdx].options[optIdx].items.splice(itIdx, 1);
+  localStorage.setItem(pk('nutData'), JSON.stringify(nutritionData.meals));
+  renderMeals();
+}
+
+// Feature 4: toggle per-item check
+function toggleItemCheck(day, mealId, itIdx) {
+  const key = day + '_' + mealId + '_' + itIdx;
+  mealChecks[key] = !mealChecks[key];
+  localStorage.setItem(pk('mealChecks'), JSON.stringify(mealChecks));
+  renderMeals();
+}
+
+// Save an edited shopping list item
+function saveShopItem(day, mealId, sIdx, el) {
+  const shopKey = day + '_' + mealId + '_shop';
+  const storeKey = pk('shop_' + shopKey);
+  const entries = JSON.parse(localStorage.getItem(storeKey) || 'null') || [];
+  entries[sIdx] = el.textContent.trim();
+  localStorage.setItem(storeKey, JSON.stringify(entries));
+}
+
+// Add a blank item to a shopping list
+function addShopItem(day, mealId, mealIdx) {
+  const shopKey = day + '_' + mealId + '_shop';
+  const storeKey = pk('shop_' + shopKey);
+  // Read current items from DOM to avoid losing unsaved edits
+  const ul = document.getElementById('shop-list-' + mealIdx);
+  const entries = ul ? Array.from(ul.children).map(li => li.textContent.trim()) : [];
+  entries.push('Nouvel article');
+  localStorage.setItem(storeKey, JSON.stringify(entries));
+  renderMeals();
+  // Focus the new item
+  setTimeout(() => {
+    const newUl = document.getElementById('shop-list-' + mealIdx);
+    if (newUl) {
+      const lastLi = newUl.lastElementChild;
+      if (lastLi) { lastLi.focus(); const r = document.createRange(); r.selectNodeContents(lastLi); window.getSelection().removeAllRanges(); window.getSelection().addRange(r); }
+    }
+  }, 50);
+}
+
+// Feature 5: copy shopping list (reads live DOM)
+function copyShoppingList(mealIdx) {
+  const ul = document.getElementById('shop-list-' + mealIdx);
+  const text = ul ? Array.from(ul.children).map(li => '• ' + li.textContent.trim()).join('\n') : '';
+  if (!text) return;
+  const _doCopy = (t) => {
+    const btns = document.querySelectorAll('.shopping-copy-btn');
+    const btn = btns[mealIdx];
+    if (btn) { const orig = btn.textContent; btn.textContent = '✓ Copié!'; setTimeout(() => btn.textContent = orig, 1500); }
+  };
+  navigator.clipboard.writeText(text).then(() => _doCopy(text)).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    _doCopy(text);
+  });
+}
+
+// ============================================================
+// PHOTOS & MESURES TAB
+// ============================================================
+
+function _photoWeeks() {
+  const weeks = new Set();
+  for (let w = 1; w <= weekCount; w++) weeks.add(w);
+  Object.keys(progressPhotos).forEach(k => { const w = parseInt(k.split('_')[0]); if (w) weeks.add(w); });
+  measurements.forEach(m => { if (m.week) weeks.add(m.week); });
+  return [...weeks].sort((a, b) => a - b);
+}
+
+function _populateWeekSelects() {
+  const weeks = _photoWeeks();
+  ['photo-week-select','comp-week-a','comp-week-b','meas-week'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const prev = parseInt(sel.value) || weeks[weeks.length - 1] || 1;
+    sel.innerHTML = '';
+    weeks.forEach(w => {
+      const opt = document.createElement('option');
+      opt.value = w;
+      opt.textContent = 'Semaine ' + w;
+      if (w === prev) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  });
+}
+
+function renderPhotosTab() {
+  _populateWeekSelects();
+  renderPhotoTimeline();
+  renderComparison();
+  renderMeasurementCharts();
+  renderMeasurementHistory();
+}
+
+// --- upload from top-section buttons ---
+function uploadPhoto(event, view) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const week = parseInt(document.getElementById('photo-week-select').value) || 1;
+  const reader = new FileReader();
+  reader.onload = () => {
+    progressPhotos[week + '_' + view] = reader.result;
+    localStorage.setItem(pk('photos'), JSON.stringify(progressPhotos));
+    renderPhotoTimeline();
+    renderComparison();
+    _populateWeekSelects();
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+// --- upload from timeline inline add button ---
+function uploadPhotoWeek(event, week, view) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    progressPhotos[week + '_' + view] = reader.result;
+    localStorage.setItem(pk('photos'), JSON.stringify(progressPhotos));
+    renderPhotoTimeline();
+    renderComparison();
+    _populateWeekSelects();
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+function deletePhoto(week, view) {
+  delete progressPhotos[week + '_' + view];
+  localStorage.setItem(pk('photos'), JSON.stringify(progressPhotos));
+  renderPhotoTimeline();
+  renderComparison();
+}
+
+function openPhotoLightbox(key) {
+  const src = progressPhotos[key];
+  if (!src) return;
+  let lb = document.getElementById('photo-lightbox');
+  if (!lb) {
+    lb = document.createElement('div');
+    lb.id = 'photo-lightbox';
+    lb.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;cursor:zoom-out';
+    lb.addEventListener('click', () => lb.remove());
+    document.body.appendChild(lb);
+  }
+  // DOM-safe: set img.src directly, never innerHTML with data URL
+  lb.innerHTML = '';
+  const img = document.createElement('img');
+  img.src = src;
+  img.style.cssText = 'max-width:90vw;max-height:90vh;border-radius:10px;box-shadow:0 0 40px rgba(0,0,0,0.8)';
+  lb.appendChild(img);
+}
+
+function renderPhotoTimeline() {
+  const container = document.getElementById('photo-timeline');
+  if (!container) return;
+  const weeks = _photoWeeks();
+  const views = [['front','Avant'],['side','Côté'],['back','Dos']];
+  container.innerHTML = '';
+
+  if (!weeks.length) {
+    const p = document.createElement('p');
+    p.className = 'photo-empty';
+    p.textContent = 'Aucune photo pour l\'instant. Sélectionnez une semaine et importez des photos.';
+    container.appendChild(p);
+    return;
+  }
+
+  weeks.forEach(w => {
+    const row = document.createElement('div');
+    row.className = 'photo-week-row';
+    const badge = document.createElement('div');
+    badge.className = 'photo-week-badge';
+    badge.textContent = 'S' + w;
+    row.appendChild(badge);
+    const cells = document.createElement('div');
+    cells.className = 'photo-week-cells';
+    views.forEach(([v, label]) => {
+      const src = progressPhotos[w + '_' + v];
+      const cell = document.createElement('div');
+      cell.className = 'photo-cell' + (src ? ' has-photo' : ' empty-cell');
+      const lbl = document.createElement('span');
+      lbl.className = 'photo-cell-label';
+      lbl.textContent = label;
+      cell.appendChild(lbl);
+      if (src) {
+        const img = document.createElement('img');
+        img.src = src;               // base64 data URL — set via .src, not innerHTML
+        img.alt = label + ' S' + w;
+        img.addEventListener('click', () => openPhotoLightbox(w + '_' + v));
+        cell.insertBefore(img, lbl);
+        const delBtn = document.createElement('button');
+        delBtn.className = 'photo-delete-btn';
+        delBtn.title = 'Supprimer';
+        delBtn.textContent = '✕';
+        delBtn.addEventListener('click', () => deletePhoto(w, v));
+        cell.appendChild(delBtn);
+      } else {
+        const lblEl = document.createElement('label');
+        lblEl.className = 'photo-add-btn';
+        lblEl.textContent = '+';
+        const inp = document.createElement('input');
+        inp.type = 'file';
+        inp.accept = 'image/*';
+        inp.style.display = 'none';
+        inp.addEventListener('change', (e) => uploadPhotoWeek(e, w, v));
+        lblEl.appendChild(inp);
+        cell.appendChild(lblEl);
+      }
+      cells.appendChild(cell);
+    });
+    row.appendChild(cells);
+    container.appendChild(row);
+  });
+}
+
+function renderComparison() {
+  const selA = document.getElementById('comp-week-a');
+  const selB = document.getElementById('comp-week-b');
+  const selV = document.getElementById('comp-view');
+  if (!selA) return;
+  const wa  = parseInt(selA.value) || 1;
+  const wb  = parseInt(selB.value) || 1;
+  const view = selV ? selV.value : 'front';
+  const srcA = progressPhotos[wa + '_' + view];
+  const srcB = progressPhotos[wb + '_' + view];
+  const imgA = document.getElementById('comp-photo-a');
+  const imgB = document.getElementById('comp-photo-b');
+  const lblA = document.getElementById('comp-label-a');
+  const lblB = document.getElementById('comp-label-b');
+  if (!imgA) return;
+  if (lblA) lblA.textContent = 'Semaine ' + wa;
+  if (lblB) lblB.textContent = 'Semaine ' + wb;
+  if (srcA) { imgA.src = srcA; imgA.style.display = 'block'; }
+  else      { imgA.removeAttribute('src'); imgA.style.display = 'none'; }
+  if (srcB) { imgB.src = srcB; imgB.style.display = 'block'; }
+  else      { imgB.removeAttribute('src'); imgB.style.display = 'none'; }
+  const wrapA = imgA.closest('.comp-photo-wrap');
+  const wrapB = imgB.closest('.comp-photo-wrap');
+  if (wrapA) wrapA.classList.toggle('no-photo', !srcA);
+  if (wrapB) wrapB.classList.toggle('no-photo', !srcB);
+}
+
+// --- measurements ---
+function saveMeasurements() {
+  const weekSel = document.getElementById('meas-week');
+  const week = parseInt(weekSel ? weekSel.value : 0);
+  if (!week) return;
+  const entry = {
+    week,
+    poids:  parseFloat(document.getElementById('meas-poids').value)  || null,
+    taille: parseFloat(document.getElementById('meas-taille').value) || null,
+    waist:  parseFloat(document.getElementById('meas-waist').value)  || null,
+    chest:  parseFloat(document.getElementById('meas-chest').value)  || null,
+    armL:   parseFloat(document.getElementById('meas-arm-l').value)  || null,
+    armR:   parseFloat(document.getElementById('meas-arm-r').value)  || null,
+    thighL: parseFloat(document.getElementById('meas-thigh-l').value)|| null,
+    thighR: parseFloat(document.getElementById('meas-thigh-r').value)|| null,
+    hips:   parseFloat(document.getElementById('meas-hips').value)   || null,
+    fat:    parseFloat(document.getElementById('meas-fat').value)    || null,
+  };
+  const idx = measurements.findIndex(m => m.week === week);
+  if (idx === -1) measurements.push(entry);
+  else measurements[idx] = entry;
+  measurements.sort((a, b) => a.week - b.week);
+  localStorage.setItem(pk('measurements'), JSON.stringify(measurements));
+  renderMeasurementCharts();
+  renderMeasurementHistory();
+  _populateWeekSelects();
+  const btn = document.querySelector('.measurements-entry .btn-save-meas');
+  if (btn) { btn.textContent = '✓ Enregistré'; setTimeout(() => { btn.textContent = 'Enregistrer'; }, 1500); }
+}
+
+function deleteMeasurement(week) {
+  measurements = measurements.filter(m => m.week !== week);
+  localStorage.setItem(pk('measurements'), JSON.stringify(measurements));
+  renderMeasurementCharts();
+  renderMeasurementHistory();
+}
+
+const _measChartColors = {
+  poids: '#C8FF00', waist: '#FF6B35', chest: '#00D4FF',
+  armL: '#FF3CAC', armR: '#FF9CAC', thighL: '#7B2FBE', thighR: '#AB5FEE', hips: '#00C896', fat: '#FF4444',
+};
+let measCharts = {};
+
+function _buildMeasChart(id, labels, datasets) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (measCharts[id]) { measCharts[id].destroy(); delete measCharts[id]; }
+  measCharts[id] = new Chart(el.getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: '#bbb', font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.07)' }, beginAtZero: false }
+      }
+    }
+  });
+}
+
+function renderMeasurementCharts() {
+  const lbs = measurements.map(m => 'S' + m.week);
+  const ds = (key, label, color) => ({
+    label, data: measurements.map(m => m[key]),
+    borderColor: color, backgroundColor: color + '22',
+    borderWidth: 2, pointBackgroundColor: color, pointRadius: 4, tension: 0.4, fill: false
+  });
+  _buildMeasChart('chart-meas-poids',  lbs, [ds('poids',  'Poids (kg)',    _measChartColors.poids)]);
+  _buildMeasChart('chart-meas-waist',  lbs, [ds('waist',  'Tour de taille', _measChartColors.waist)]);
+  _buildMeasChart('chart-meas-chest',  lbs, [ds('chest',  'Poitrine',      _measChartColors.chest)]);
+  _buildMeasChart('chart-meas-arms',   lbs, [ds('armL','Bras G',_measChartColors.armL), ds('armR','Bras D',_measChartColors.armR)]);
+  _buildMeasChart('chart-meas-thighs', lbs, [ds('thighL','Cuisse G',_measChartColors.thighL), ds('thighR','Cuisse D',_measChartColors.thighR)]);
+  _buildMeasChart('chart-meas-hips',   lbs, [ds('hips',   'Hanches',       _measChartColors.hips)]);
+}
+
+function renderMeasurementHistory() {
+  const tbody = document.getElementById('meas-history-body');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  const fields = ['poids','taille','waist','chest','armL','armR','thighL','thighR','hips','fat'];
+  const rows = [...measurements].reverse();
+  if (!rows.length) {
+    const tr = tbody.insertRow();
+    const td = tr.insertCell();
+    td.colSpan = 12;
+    td.style.cssText = 'text-align:center;color:var(--muted);padding:20px';
+    td.textContent = 'Aucune donnée';
+    return;
+  }
+  rows.forEach(m => {
+    const tr = tbody.insertRow();
+    const wkTd = tr.insertCell();
+    wkTd.textContent = 'S' + m.week;
+    fields.forEach(f => {
+      const td = tr.insertCell();
+      td.textContent = m[f] != null ? m[f] : '—';
+    });
+    const actTd = tr.insertCell();
+    const delBtn = document.createElement('button');
+    delBtn.className = 'meas-delete-btn';
+    delBtn.title = 'Supprimer';
+    delBtn.textContent = '✕';
+    delBtn.addEventListener('click', () => deleteMeasurement(m.week));
+    actTd.appendChild(delBtn);
+  });
+}
+
+// --- volume load ---
+const MUSCLE_GROUPS = {
+  'Dos / Biceps':         ['dos','biceps','tirage','low row','curl','lat pulldown','tractions'],
+  'Pectoraux / Triceps':  ['pectoral','tricep','couché','butterfly','chestpress','dips','extension'],
+  'Jambes':               ['jambe','squat','fente','leg','quad','hamstring'],
+  'Épaules / Dos':        ['épaule','shoulder','deltoid','élévation','incliné','crunch','erec'],
+};
+const _groupColors = {
+  'Dos / Biceps':        '#00D4FF',
+  'Pectoraux / Triceps': '#FF6B35',
+  'Jambes':              '#C8FF00',
+  'Épaules / Dos':       '#FF3CAC',
+  'Autre':               '#888',
+};
+
+function _getDayGroup(dayLabel) {
+  const lc = (dayLabel || '').toLowerCase();
+  for (const [group, kws] of Object.entries(MUSCLE_GROUPS)) {
+    if (kws.some(kw => lc.includes(kw))) return group;
+  }
+  return 'Autre';
+}
+
+function _computeVolumeData(filterGroup) {
+  const groups = filterGroup === 'all' ? [...Object.keys(MUSCLE_GROUPS), 'Autre'] : [filterGroup];
+  const labels = Array.from({length: weekCount}, (_, i) => 'S' + (i + 1));
+  const datasets = groups.map(group => {
+    const weeklyVol = Array(weekCount).fill(0);
+    Object.values(trainingData.days).forEach(day => {
+      if (_getDayGroup(day.label || '') !== group) return;
+      (day.exercises || []).forEach(ex => {
+        (ex.weeks || []).forEach((w, wIdx) => {
+          if (wIdx >= weekCount) return;
+          const charge = parseFloat(w.charge) || 0;
+          const reps   = parseFloat(String(w.reps || '').split('-')[0].split('+')[0]) || 0;
+          const series = parseFloat(w.series) || 0;
+          weeklyVol[wIdx] += charge * reps * series;
+        });
+      });
+    });
+    const color = _groupColors[group] || '#888';
+    return { label: group, data: weeklyVol, backgroundColor: color + 'BB', borderColor: color, borderWidth: 2, borderRadius: 4 };
+  });
+  return { labels, datasets };
+}
+
+function updateVolumeChart() {
+  const el = document.getElementById('chart-volume');
+  if (!el) return;
+  if (charts['chart-volume']) { charts['chart-volume'].destroy(); }
+  const filterGroup = document.getElementById('vol-muscle-select') ? document.getElementById('vol-muscle-select').value : 'all';
+  const { labels, datasets } = _computeVolumeData(filterGroup);
+  charts['chart-volume'] = new Chart(el.getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: '#ccc', font: { size: 11 } } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${Math.round(ctx.raw).toLocaleString()} kg·reps` } }
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y: { stacked: true, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.07)' }, beginAtZero: true,
+             title: { display: true, text: 'Volume (kg × reps × séries)', color: '#666', font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+function updateVolumeStackedChart() {
+  const el = document.getElementById('chart-volume-stacked');
+  if (!el) return;
+  if (charts['chart-volume-stacked']) { charts['chart-volume-stacked'].destroy(); }
+  const { datasets } = _computeVolumeData('all');
+  const totalDatasets = datasets.map(ds => ({
+    label: ds.label,
+    data: [ds.data.reduce((a, b) => a + b, 0)],
+    backgroundColor: ds.backgroundColor,
+    borderColor: ds.borderColor,
+    borderWidth: 2, borderRadius: 6,
+  }));
+  charts['chart-volume-stacked'] = new Chart(el.getContext('2d'), {
+    type: 'bar',
+    data: { labels: ['Total programme'], datasets: totalDatasets },
+    options: {
+      responsive: true, indexAxis: 'y',
+      plugins: {
+        legend: { labels: { color: '#ccc', font: { size: 11 } } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${Math.round(ctx.raw).toLocaleString()} kg·reps` } }
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' },
+             title: { display: true, text: 'Volume total (kg × reps × séries)', color: '#666', font: { size: 11 } } },
+        y: { stacked: true, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+      }
+    }
+  });
 }
 
 // ============================================================
@@ -810,13 +2346,63 @@ function deleteProfile(e, id) {
   const prof = profiles.find(p => p.id === id);
   if (!prof) return;
   if (!confirm('Supprimer le profil "' + prof.name + '" et toutes ses données ?')) return;
-  ['training','videos','youtube','notes','progress','meals','weekCount','dayCount'].forEach(k => {
+  ['training','videos','youtube','notes','progress','meals','weekCount','dayCount','timers','mealChecks','nutData','voice','feedback','photos','measurements'].forEach(k => {
     localStorage.removeItem('p_' + id + '_' + k);
   });
   profiles = profiles.filter(p => p.id !== id);
   persistProfiles();
   if (currentProfileId === id) switchProfile(profiles[0].id);
   else renderProfileMenu();
+}
+
+// ============================================================
+// MOBILE PREVIEW TOGGLE (Feature 7) — iframe overlay for true @media behaviour
+// ============================================================
+function toggleMobilePreview() {
+  const existing = document.getElementById('mobile-preview-overlay');
+  const btns = document.querySelectorAll('.btn-mobile-preview');
+  if (existing) {
+    existing.remove();
+    btns.forEach(b => b.classList.remove('active'));
+    return;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'mobile-preview-overlay';
+  overlay.style.cssText = [
+    'position:fixed', 'inset:0', 'z-index:99999',
+    'background:rgba(0,0,0,0.82)',
+    'display:flex', 'align-items:center', 'justify-content:center',
+    'flex-direction:column', 'gap:12px'
+  ].join(';');
+
+  // Click backdrop to close
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) toggleMobilePreview();
+  });
+
+  const frame = document.createElement('iframe');
+  frame.src = window.location.href;
+  frame.style.cssText = [
+    'width:390px', 'height:844px',
+    'border:none', 'border-radius:40px',
+    'box-shadow:0 0 0 12px #1a1a1a, 0 0 0 14px #444',
+    'flex-shrink:0'
+  ].join(';');
+
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕ Fermer';
+  closeBtn.style.cssText = [
+    'background:#fff', 'color:#111', 'border:none',
+    'border-radius:8px', 'padding:8px 20px', 'font-size:14px',
+    'font-weight:600', 'cursor:pointer', 'letter-spacing:.5px'
+  ].join(';');
+  closeBtn.addEventListener('click', toggleMobilePreview);
+
+  overlay.appendChild(frame);
+  overlay.appendChild(closeBtn);
+  document.body.appendChild(overlay);
+  btns.forEach(b => b.classList.add('active'));
 }
 
 // ============================================================
