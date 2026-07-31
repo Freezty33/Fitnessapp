@@ -2450,7 +2450,10 @@ async function onStudentSwitch(studentId) {
 async function loadStudentData(studentId) {
   if (!studentId || typeof sb === 'undefined') return;
 
-  // Paint immediately from localStorage cache
+  // Namespace all localStorage keys under this student's ID
+  currentProfileId = studentId;
+
+  // Paint immediately from localStorage cache for this student
   loadProfileData();
   renderSelectors();
   renderTraining();

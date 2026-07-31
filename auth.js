@@ -27,6 +27,9 @@ async function _onSignedIn(uid) {
   if (!_myProfile) { showLoginScreen(); return; }
   if (_myProfile.role === 'coach') {
     await _buildCoachSwitcher();
+    if (_viewingStudentId && typeof loadStudentData === 'function') {
+      await loadStudentData(_viewingStudentId);
+    }
   } else {
     const { data } = await sb
       .from('student_profiles')
