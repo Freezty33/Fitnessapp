@@ -91,11 +91,118 @@ async function _buildCoachSwitcher() {
   _viewingStudentId = students[0].id;
   bar.appendChild(sel);
 
+  const addBtn = document.createElement('button');
+  addBtn.textContent = '+ Ajouter un étudiant';
+  addBtn.style.cssText = 'background:transparent;border:1px solid #C8FF00;color:#C8FF00;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer';
+  addBtn.addEventListener('click', _showCreateStudentModal);
+  bar.appendChild(addBtn);
+
   const out = document.createElement('button');
   out.textContent = 'Déconnexion';
   out.style.cssText = 'margin-left:auto;background:transparent;border:1px solid #333;color:#666;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer';
   out.addEventListener('click', signOut);
   bar.appendChild(out);
+}
+
+// ── Create-student modal ──────────────────────────────────────
+function _showCreateStudentModal() {
+  if (document.getElementById('create-student-modal')) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'create-student-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:99999;display:flex;align-items:center;justify-content:center';
+
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#111;border:1px solid #222;border-radius:12px;padding:32px;width:340px;display:flex;flex-direction:column;gap:16px';
+
+  const title = document.createElement('h2');
+  title.textContent = 'Nouvel étudiant';
+  title.style.cssText = 'color:#C8FF00;margin:0;font-size:18px';
+  box.appendChild(title);
+
+  const fields = [
+    { id: 'cs-name',  label: 'Nom complet',        type: 'text',     placeholder: 'Louis Dupont' },
+    { id: 'cs-email', label: 'Email',               type: 'email',    placeholder: 'etudiant@email.com' },
+    { id: 'cs-pass',  label: 'Mot de passe',        type: 'password', placeholder: 'Min. 6 caractères' },
+    { id: 'cs-goal',  label: 'Objectif (optionnel)',type: 'text',     placeholder: 'Prise de masse…' },
+  ];
+  fields.forEach(f => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-direction:column;gap:4px';
+    const lbl = document.createElement('label');
+    lbl.textContent = f.label;
+    lbl.style.cssText = 'color:#aaa;font-size:12px';
+    const inp = document.createElement('input');
+    inp.id = f.id;
+    inp.type = f.type;
+    inp.placeholder = f.placeholder;
+    inp.style.cssText = 'background:#1a1a1a;color:#fff;border:1px solid #333;border-radius:6px;padding:8px 10px;font-size:13px;outline:none';
+    wrap.appendChild(lbl);
+    wrap.appendChild(inp);
+    box.appendChild(wrap);
+  });
+
+  const errEl = document.createElement('p');
+  errEl.style.cssText = 'color:#ff4444;font-size:12px;margin:0;display:none';
+  box.appendChild(errEl);
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;margin-top:4px';
+
+  const cancel = document.createElement('button');
+  cancel.textContent = 'Annuler';
+  cancel.style.cssText = 'background:transparent;border:1px solid #333;color:#666;border-radius:6px;padding:8px 16px;font-size:13px;cursor:pointer';
+  cancel.addEventListener('click', () => overlay.remove());
+
+  const submit = document.createElement('button');
+  submit.textContent = 'Créer';
+  submit.style.cssText = 'background:#C8FF00;color:#000;border:none;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:700;cursor:pointer';
+  submit.addEventListener('click', async () => {
+    const name  = document.getElementById('cs-name').value.trim();
+    const email = document.getElementById('cs-email').value.trim();
+    const pass  = document.getElementById('cs-pass').value;
+    const goal  = document.getElementById('cs-goal').value.trim();
+
+    errEl.style.display = 'none';
+    if (!name || !email || !pass) { errEl.textContent = 'Nom, email et mot de passe sont requis.'; errEl.style.display = 'block'; return; }
+
+    submit.disabled = true;
+    submit.textContent = 'Création…';
+
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      const res = await fetch('/.netlify/functions/create-student', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ email, password: pass, full_name: name, goal_text: goal }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erreur serveur');
+      overlay.remove();
+      await _buildCoachSwitcher();
+      // Switch to the new student immediately
+      const switcher = document.getElementById('coach-switcher-bar')?.querySelector('select');
+      if (switcher) {
+        for (const opt of switcher.options) {
+          if (opt.textContent === name) { switcher.value = opt.value; switcher.dispatchEvent(new Event('change')); break; }
+        }
+      }
+    } catch (e) {
+      errEl.textContent = e.message;
+      errEl.style.display = 'block';
+      submit.disabled = false;
+      submit.textContent = 'Créer';
+    }
+  });
+
+  row.appendChild(cancel);
+  row.appendChild(submit);
+  box.appendChild(row);
+  overlay.appendChild(box);
+  // Close on backdrop click
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  document.getElementById('cs-name').focus();
 }
 
 // ── Auth state listener ───────────────────────────────────────
