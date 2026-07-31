@@ -22,14 +22,15 @@
     <!-- Left cluster: logo + coach controls grouped tightly -->
     <div class="header-left">
       <div class="logo" id="profile-wrap">
-        <button class="logo-btn logo-btn--boxed" id="logo-btn" onclick="toggleProfileMenu()" title="Changer de profil">
+        <button class="logo-btn" id="logo-btn" onclick="toggleProfileMenu()" title="Changer de profil">
           LOUIS<span>FIT</span>
         </button>
         <div class="profile-menu" id="profile-menu"></div>
       </div>
-      <!-- Coach-only: student switcher + add student -->
-      <div id="coach-header-controls" style="display:none;align-items:center;gap:6px">
+      <!-- Coach-only: student switcher + add + delete (desktop, hidden on mobile) -->
+      <div id="coach-header-controls" class="coach-header-controls" style="display:none">
         <select id="coach-student-select" class="coach-student-select"></select>
+        <button id="coach-delete-btn" onclick="_confirmDeleteStudent()" class="coach-delete-btn" title="Supprimer cet étudiant">🗑</button>
         <button id="coach-add-btn" onclick="_showCreateStudentModal()" class="coach-add-btn">+ Ajouter</button>
       </div>
     </div>
@@ -50,6 +51,14 @@
     </div>
     <!-- Mobile nav drawer -->
     <div class="nav-drawer" id="nav-drawer">
+      <!-- Coach student controls (mobile) -->
+      <div id="coach-drawer-controls" class="coach-drawer-controls" style="display:none">
+        <select id="coach-student-select-mobile" class="coach-student-select" style="width:100%"></select>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button onclick="_showCreateStudentModal();closeMobileNav()" class="coach-add-btn" style="flex:1">+ Ajouter</button>
+          <button onclick="_confirmDeleteStudent();closeMobileNav()" class="coach-delete-btn">🗑</button>
+        </div>
+      </div>
       <button class="nav-drawer-btn active" onclick="showTab('training');closeMobileNav()">Plan d'Entraînement</button>
       <button class="nav-drawer-btn" onclick="showTab('graphs');closeMobileNav()">Graphiques</button>
       <button class="nav-drawer-btn" onclick="showTab('nutrition');closeMobileNav()">Plan Alimentaire</button>

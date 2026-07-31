@@ -62,7 +62,7 @@ function _hideSignOutButton() {
   if (btnM) btnM.style.display = 'none';
 }
 
-// ── Coach student switcher (uses header elements) ─────────────
+// ── Coach student switcher (desktop header + mobile drawer) ───
 async function _buildCoachSwitcher() {
   const { data: students, error: swErr } = await sb
     .from('student_profiles')
@@ -70,29 +70,86 @@ async function _buildCoachSwitcher() {
     .eq('coach_id', _myProfile.id);
 
   if (swErr) { console.error('[switcher]', swErr.message); }
-  if (!students || !students.length) return;
 
-  const controls = document.getElementById('coach-header-controls');
-  const sel      = document.getElementById('coach-student-select');
-  if (!controls || !sel) return;
+  const controls     = document.getElementById('coach-header-controls');
+  const drawerCtrls  = document.getElementById('coach-drawer-controls');
+  const sel          = document.getElementById('coach-student-select');
+  const selMobile    = document.getElementById('coach-student-select-mobile');
 
-  // Rebuild options
-  while (sel.firstChild) sel.removeChild(sel.firstChild);
-  students.forEach(s => {
-    const opt = document.createElement('option');
-    opt.value = s.id;
-    const prof = s['profiles!student_profiles_user_id_fkey'] || s.profiles;
-    opt.textContent = (prof && prof.full_name) ? prof.full_name : s.id;
-    sel.appendChild(opt);
+  if (!students || !students.length) {
+    if (controls)    controls.style.display    = 'none';
+    if (drawerCtrls) drawerCtrls.style.display = 'none';
+    return;
+  }
+
+  // Populate both selects
+  [sel, selMobile].forEach(s => {
+    if (!s) return;
+    while (s.firstChild) s.removeChild(s.firstChild);
+    students.forEach(st => {
+      const opt = document.createElement('option');
+      opt.value = st.id;
+      const prof = st['profiles!student_profiles_user_id_fkey'] || st.profiles;
+      opt.textContent = (prof && prof.full_name) ? prof.full_name : st.id;
+      s.appendChild(opt);
+    });
   });
 
-  sel.onchange = () => {
-    _viewingStudentId = sel.value;
-    if (typeof onStudentSwitch === 'function') onStudentSwitch(_viewingStudentId);
+  const onSwitch = (id) => {
+    _viewingStudentId = id;
+    // Keep both selects in sync
+    if (sel)       sel.value       = id;
+    if (selMobile) selMobile.value = id;
+    if (typeof onStudentSwitch === 'function') onStudentSwitch(id);
   };
 
+  if (sel)       sel.onchange       = () => onSwitch(sel.value);
+  if (selMobile) selMobile.onchange = () => onSwitch(selMobile.value);
+
   _viewingStudentId = students[0].id;
-  controls.style.display = 'flex';
+  if (controls)    controls.style.display    = 'flex';
+  if (drawerCtrls) drawerCtrls.style.display = 'block';
+}
+
+// ── Delete student ────────────────────────────────────────────
+function _confirmDeleteStudent() {
+  const sel  = document.getElementById('coach-student-select');
+  const selM = document.getElementById('coach-student-select-mobile');
+  const id   = (sel && sel.value) || (selM && selM.value);
+  const name = (sel && sel.options[sel.selectedIndex]?.textContent)
+             || (selM && selM.options[selM.selectedIndex]?.textContent)
+             || 'cet étudiant';
+  if (!id) return;
+
+  if (!confirm(`Supprimer définitivement le profil de ${name} ?\nToutes les données seront effacées.`)) return;
+
+  _doDeleteStudent(id, name);
+}
+
+async function _doDeleteStudent(studentProfileId, name) {
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch('/.netlify/functions/delete-student', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+      body: JSON.stringify({ student_profile_id: studentProfileId }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Erreur serveur');
+    // Remove from localStorage
+    ['training','weekCount','dayCount','progress','feedback','notes','videos','youtube','timers','mealChecks','voice','photos','measurements','meals','nutData'].forEach(k => {
+      localStorage.removeItem(`p_${studentProfileId}_${k}`);
+    });
+    await _buildCoachSwitcher();
+    // Switch to first remaining student if any
+    const sel = document.getElementById('coach-student-select');
+    if (sel && sel.options.length > 0 && typeof onStudentSwitch === 'function') {
+      _viewingStudentId = sel.value;
+      onStudentSwitch(_viewingStudentId);
+    }
+  } catch (e) {
+    alert('Erreur lors de la suppression : ' + e.message);
+  }
 }
 
 // ── Create-student modal ──────────────────────────────────────
@@ -175,15 +232,12 @@ function _showCreateStudentModal() {
       overlay.remove();
       await _buildCoachSwitcher();
 
-      // Auto-select the new student
-      const sel = document.getElementById('coach-student-select');
-      if (sel) {
+      // Auto-select the new student (check both selects)
+      for (const selId of ['coach-student-select', 'coach-student-select-mobile']) {
+        const sel = document.getElementById(selId);
+        if (!sel) continue;
         for (const opt of sel.options) {
-          if (opt.textContent === name) {
-            sel.value = opt.value;
-            sel.dispatchEvent(new Event('change'));
-            break;
-          }
+          if (opt.textContent === name) { sel.value = opt.value; sel.dispatchEvent(new Event('change')); break; }
         }
       }
     } catch (e) {
@@ -210,6 +264,8 @@ sb.auth.onAuthStateChange(async (event, session) => {
     _viewingStudentId = null;
     const controls = document.getElementById('coach-header-controls');
     if (controls) controls.style.display = 'none';
+    const drawerCtrls = document.getElementById('coach-drawer-controls');
+    if (drawerCtrls) drawerCtrls.style.display = 'none';
     _hideSignOutButton();
     showLoginScreen();
   }
