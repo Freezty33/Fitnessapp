@@ -809,8 +809,9 @@ function openBilanOverlay(fbKey) {
     fb.note = note.value;
     workoutFeedback[fbKey] = fb;
     localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+    _saveFeedbackToSupabase(fbKey, fb);
     overlay.remove();
-    renderTraining(); // re-render so summary card appears
+    renderTraining();
   });
 
   const scrollBody = document.createElement('div');
@@ -2434,6 +2435,137 @@ function toggleMobilePreview() {
   overlay.appendChild(closeBtn);
   document.body.appendChild(overlay);
   btns.forEach(b => b.classList.add('active'));
+}
+
+// ============================================================
+// SUPABASE — load student data into app state
+// Called by auth.js after login and when coach switches student
+// ============================================================
+
+// Hook called by auth.js coach switcher
+async function onStudentSwitch(studentId) {
+  await loadStudentData(studentId);
+}
+
+async function loadStudentData(studentId) {
+  if (!studentId || typeof sb === 'undefined') return;
+
+  // Paint immediately from localStorage cache
+  loadProfileData();
+  renderSelectors();
+  renderTraining();
+
+  // Fetch workout plan from Supabase in background
+  const { data: plan } = await sb
+    .from('workout_plans')
+    .select('*, exercise_assignments(*)')
+    .eq('student_id', studentId)
+    .order('position', { foreignTable: 'exercise_assignments' })
+    .maybeSingle();
+
+  if (plan) {
+    weekCount = plan.week_count;
+    dayCount  = plan.day_count;
+    trainingData.days = _adaptPlanToLocal(plan);
+    localStorage.setItem(pk('training'),   JSON.stringify(trainingData.days));
+    localStorage.setItem(pk('weekCount'),  weekCount);
+    localStorage.setItem(pk('dayCount'),   dayCount);
+    renderSelectors();
+    renderTraining();
+  }
+
+  // Fetch body metrics
+  const { data: metrics } = await sb
+    .from('body_metrics')
+    .select('*')
+    .eq('student_id', studentId)
+    .order('week_number');
+
+  if (metrics && metrics.length) {
+    savedProgress = {
+      weeks:   metrics.map(r => r.week_number),
+      poids:   metrics.map(r => r.weight_kg),
+      graisse: metrics.map(r => r.body_fat_pct),
+      eau:     metrics.map(r => r.water_pct),
+      muscle:  metrics.map(r => r.muscle_kg),
+    };
+    localStorage.setItem(pk('progress'), JSON.stringify(savedProgress));
+  }
+
+  // Fetch exercise logs and populate week fields
+  const { data: logs } = await sb
+    .from('exercise_logs')
+    .select('*')
+    .eq('student_id', studentId);
+
+  if (logs && logs.length) {
+    logs.forEach(log => {
+      const wIdx = (log.week_number || 1) - 1;
+      Object.values(trainingData.days).forEach(day => {
+        day.exercises.forEach(ex => {
+          if (ex.name !== log.exercise_name) return;
+          while (ex.weeks.length <= wIdx) ex.weeks.push({ series:'', reps:'', charge:'', done:'' });
+          if (log.series_done) ex.weeks[wIdx].series = log.series_done;
+          if (log.reps_done)   ex.weeks[wIdx].reps   = log.reps_done;
+          if (log.charge_kg)   ex.weeks[wIdx].charge = log.charge_kg;
+          if (log.completed)   ex.weeks[wIdx].done   = '✓';
+        });
+      });
+    });
+    localStorage.setItem(pk('training'), JSON.stringify(trainingData.days));
+    renderTraining();
+  }
+
+  // Fetch session feedback
+  const { data: feedback } = await sb
+    .from('session_feedback')
+    .select('*')
+    .eq('student_id', studentId);
+
+  if (feedback && feedback.length) {
+    feedback.forEach(fb => {
+      const key = fb.day_number + '_' + fb.week_number;
+      workoutFeedback[key] = { rating: fb.rating || 0, note: fb.note || '', pain: fb.pain_points || [] };
+    });
+    localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+  }
+}
+
+// Converts a Supabase workout_plan row into the local trainingData.days shape
+function _adaptPlanToLocal(plan) {
+  const days = {};
+  (plan.exercise_assignments || []).forEach(a => {
+    if (!days[a.day_number]) {
+      days[a.day_number] = { label: `Jour ${a.day_number}`, exercises: [] };
+    }
+    days[a.day_number].exercises.push({
+      name:  a.name,
+      tips:  a.tips || '',
+      weeks: Array.from({ length: plan.week_count }, () => ({
+        series: a.target_series ?? '',
+        reps:   a.target_reps   ?? '',
+        charge: a.target_charge ?? '',
+        done:   ''
+      }))
+    });
+  });
+  return days;
+}
+
+// ── Feedback save now also syncs to Supabase ─────────────────
+// Patches the bilan overlay save button to call this
+async function _saveFeedbackToSupabase(fbKey, fb) {
+  if (typeof sb === 'undefined' || !activeStudentId()) return;
+  const [day, week] = fbKey.split('_').map(Number);
+  const { error } = await sb.from('session_feedback').upsert({
+    student_id:  activeStudentId(),
+    day_number:  day,
+    week_number: week,
+    rating:      fb.rating || 0,
+    note:        fb.note   || '',
+    pain_points: fb.pain   || []
+  }, { onConflict: 'student_id,day_number,week_number' });
+  if (error) console.warn('[sync] feedback', error.message);
 }
 
 // ============================================================
