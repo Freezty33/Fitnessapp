@@ -48,6 +48,14 @@ body {
   justify-content: space-between;
   gap: 24px;
 }
+/* Left header cluster */
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 .logo {
   position: relative;
   flex-shrink: 0;
@@ -69,6 +77,49 @@ body {
 }
 .logo-btn:hover { opacity: 0.8; }
 .logo-btn span { color: var(--accent); }
+
+/* Boxed variant matching the screenshot */
+.logo-btn--boxed {
+  border: 2px solid #fff;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 18px;
+}
+
+/* Coach student switcher */
+.coach-student-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: #111 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 10px center;
+  color: #fff;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 5px 28px 5px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  min-width: 120px;
+  transition: border-color 0.15s;
+}
+.coach-student-select:hover { border-color: #888; }
+.coach-student-select:focus { outline: none; border-color: var(--accent); }
+
+.coach-add-btn {
+  background: transparent;
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.coach-add-btn:hover {
+  background: var(--accent);
+  color: #000;
+}
 
 /* Profile dropdown */
 .profile-menu {

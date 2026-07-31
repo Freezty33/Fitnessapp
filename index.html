@@ -19,16 +19,19 @@
 <!-- HEADER -->
 <header class="header">
   <div class="header-inner">
-    <div class="logo" id="profile-wrap">
-      <button class="logo-btn" id="logo-btn" onclick="toggleProfileMenu()" title="Changer de profil">
-        LOUIS<span>FIT</span>
-      </button>
-      <div class="profile-menu" id="profile-menu"></div>
-    </div>
-    <!-- Coach-only: student switcher + add student (injected by auth.js) -->
-    <div id="coach-header-controls" style="display:none;align-items:center;gap:8px;flex-shrink:0">
-      <select id="coach-student-select" style="background:#1a1a1a;color:#fff;border:1px solid #333;border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer"></select>
-      <button id="coach-add-btn" onclick="_showCreateStudentModal()" style="background:transparent;border:1px solid #C8FF00;color:#C8FF00;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;white-space:nowrap">+ Ajouter</button>
+    <!-- Left cluster: logo + coach controls grouped tightly -->
+    <div class="header-left">
+      <div class="logo" id="profile-wrap">
+        <button class="logo-btn logo-btn--boxed" id="logo-btn" onclick="toggleProfileMenu()" title="Changer de profil">
+          LOUIS<span>FIT</span>
+        </button>
+        <div class="profile-menu" id="profile-menu"></div>
+      </div>
+      <!-- Coach-only: student switcher + add student -->
+      <div id="coach-header-controls" style="display:none;align-items:center;gap:6px">
+        <select id="coach-student-select" class="coach-student-select"></select>
+        <button id="coach-add-btn" onclick="_showCreateStudentModal()" class="coach-add-btn">+ Ajouter</button>
+      </div>
     </div>
     <nav class="nav" id="main-nav">
       <button class="nav-btn active" onclick="showTab('training')">Plan d'Entraînement</button>
