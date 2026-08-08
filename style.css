@@ -581,10 +581,10 @@ body {
 .btn-add-exercise:hover { background: rgba(200,255,0,0.18); }
 
 .btn-download-pdf {
-  background: rgba(255,255,255,0.05);
-  border: 1px solid #333;
-  color: #888;
-  padding: 7px 14px;
+  background: rgba(200,255,0,0.1);
+  border: 1px dashed rgba(200,255,0,0.4);
+  color: var(--accent);
+  padding: 7px 16px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13px;
@@ -592,7 +592,7 @@ body {
   transition: all 0.16s;
   white-space: nowrap;
 }
-.btn-download-pdf:hover { border-color: #888; color: #ccc; background: rgba(255,255,255,0.1); }
+.btn-download-pdf:hover { background: rgba(200,255,0,0.18); }
 .hero-selectors .btn-download-pdf {
   padding: 14px 20px;
   font-size: 15px;
