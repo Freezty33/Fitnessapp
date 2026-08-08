@@ -104,6 +104,17 @@ create table public.nutrition_plans (
   updated_at   timestamptz default now()
 );
 
+-- Coach voice notes linked to exercises (for cross-device sharing via Storage)
+create table public.coach_voice_notes (
+  id           uuid primary key default gen_random_uuid(),
+  student_id   uuid not null references public.student_profiles(id) on delete cascade,
+  voice_key    text not null,          -- "dayNum_exerciseName"
+  storage_path text not null,          -- path inside voice-notes bucket
+  public_url   text not null,
+  created_at   timestamptz default now(),
+  unique(student_id, voice_key)
+);
+
 -- Post-session feedback (rating + notes + pain map)
 create table public.session_feedback (
   id          uuid primary key default gen_random_uuid(),
@@ -130,6 +141,7 @@ alter table public.exercise_logs        enable row level security;
 alter table public.body_metrics         enable row level security;
 alter table public.nutrition_plans      enable row level security;
 alter table public.session_feedback     enable row level security;
+alter table public.coach_voice_notes    enable row level security;
 
 
 -- ============================================================
@@ -284,6 +296,21 @@ create policy "coach writes feedback"
   using (public.i_coach(student_id))
   with check (public.i_coach(student_id));
 
+-- coach_voice_notes
+create policy "coach manages voice notes"
+  on public.coach_voice_notes for all
+  using (public.i_coach(student_id))
+  with check (public.i_coach(student_id));
+
+create policy "student reads voice notes"
+  on public.coach_voice_notes for select
+  using (
+    exists(
+      select 1 from public.student_profiles
+      where id = student_id and user_id = auth.uid()
+    )
+  );
+
 
 -- ============================================================
 -- 5. PROFILE AUTO-CREATE TRIGGER
@@ -320,3 +347,41 @@ create trigger on_auth_user_created
 --   where id = '<your-auth-user-uuid>';
 --
 -- ============================================================
+
+
+-- ============================================================
+-- 7. STORAGE BUCKET FOR VOICE NOTES
+-- Run these in the SQL Editor to create the bucket and policies.
+-- ============================================================
+
+-- Create the bucket (public so student devices can play audio without auth)
+insert into storage.buckets (id, name, public)
+values ('voice-notes', 'voice-notes', true)
+on conflict (id) do nothing;
+
+-- Allow coaches to upload / delete their own students' files
+create policy "coach upload voice"
+  on storage.objects for insert
+  with check (
+    bucket_id = 'voice-notes'
+    and public.my_role() = 'coach'
+  );
+
+create policy "coach delete voice"
+  on storage.objects for delete
+  using (
+    bucket_id = 'voice-notes'
+    and public.my_role() = 'coach'
+  );
+
+create policy "coach update voice"
+  on storage.objects for update
+  using (
+    bucket_id = 'voice-notes'
+    and public.my_role() = 'coach'
+  );
+
+-- Anyone can read (bucket is public, but belt-and-suspenders)
+create policy "public read voice"
+  on storage.objects for select
+  using (bucket_id = 'voice-notes');

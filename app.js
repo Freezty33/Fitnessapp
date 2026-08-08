@@ -324,6 +324,8 @@ function removeDay() {
     trainingData.days[1] = { label: 'Jour 1', exercises: [] };
     for (let w = 1; w <= weekCount; w++) _deleteFeedbackKey(`1_${w}`);
     localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+    Object.keys(savedVoice).forEach(k => { if (k.startsWith('1_')) delete savedVoice[k]; });
+    localStorage.setItem(pk('voice'), JSON.stringify(savedVoice));
     persistTraining();
     renderTraining();
     return;
@@ -341,6 +343,18 @@ function removeDay() {
   });
   workoutFeedback = newFeedback;
   localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+  // Delete voice recordings for the removed day, shift keys for days above d
+  const newVoice = {};
+  Object.keys(savedVoice).forEach(key => {
+    const sep = key.indexOf('_');
+    const kd = Number(key.slice(0, sep));
+    const exPart = key.slice(sep + 1);
+    if (kd === d) return;
+    const newKey = kd > d ? `${kd - 1}_${exPart}` : key;
+    newVoice[newKey] = savedVoice[key];
+  });
+  savedVoice = newVoice;
+  localStorage.setItem(pk('voice'), JSON.stringify(savedVoice));
   // Shift days
   const newDays = {};
   for (let i = 1; i <= dayCount; i++) {
@@ -458,7 +472,8 @@ function renderTraining() {
     const defaultSecs = timerDefaults[timerKey] || 90;
 
     // Voice recording
-    const hasVoice = !!savedVoice[ex.name];
+    const voiceKey = currentDay + '_' + ex.name;
+    const hasVoice = !!savedVoice[voiceKey];
     const voiceHtml = `
       <div class="ex-voice" id="voice-${i}">
         <span class="ex-voice-label">🎙 Coach</span>
@@ -571,11 +586,12 @@ function renderTraining() {
   grid.innerHTML = html;
   // Set audio src and draw waveforms after render (DOM property — not attribute — to bypass security hook)
   dayData.exercises.forEach((ex, i) => {
-    if (!savedVoice[ex.name]) return;
-    drawWaveform(i, ex.name);
+    const vKey = currentDay + '_' + ex.name;
+    if (!savedVoice[vKey]) return;
+    drawWaveform(i, vKey);
     const audioEl = document.getElementById('voice-audio-' + i);
     if (audioEl) {
-      const dataUrl = savedVoice[ex.name];
+      const dataUrl = savedVoice[vKey];
       try {
         const [header, b64] = dataUrl.split(',');
         const mime = header.match(/:(.*?);/)[1];
@@ -1060,16 +1076,19 @@ function _startVoiceRecord(idx) {
     mr.onstop = () => {
       stream.getTracks().forEach(t => t.stop());
       const blob = new Blob(chunks, { type: actualMime });
+      const dayData = trainingData.days[currentDay];
+      if (!dayData || !dayData.exercises[idx]) return;
+      const exName = currentDay + '_' + dayData.exercises[idx].name;
+      // Save locally as base64
       const reader = new FileReader();
       reader.onload = () => {
-        const dayData = trainingData.days[currentDay];
-        if (!dayData || !dayData.exercises[idx]) return;
-        const exName = dayData.exercises[idx].name;
         savedVoice[exName] = reader.result;
         localStorage.setItem(pk('voice'), JSON.stringify(savedVoice));
         renderTraining();
       };
       reader.readAsDataURL(blob);
+      // Upload to Supabase Storage for cross-device sharing
+      _uploadVoiceToSupabase(blob, actualMime, exName);
     };
     mr.start();
     _recState[idx] = { recording: true, mr, stream };
@@ -1094,10 +1113,49 @@ function _stopVoiceRecord(idx) {
 function deleteVoice(idx) {
   const dayData = trainingData.days[currentDay];
   if (!dayData || !dayData.exercises[idx]) return;
-  const exName = dayData.exercises[idx].name;
+  const exName = currentDay + '_' + dayData.exercises[idx].name;
   delete savedVoice[exName];
   localStorage.setItem(pk('voice'), JSON.stringify(savedVoice));
+  _deleteVoiceFromSupabase(exName);
   renderTraining();
+}
+
+async function _uploadVoiceToSupabase(blob, mime, voiceKey) {
+  if (typeof sb === 'undefined' || typeof activeStudentId !== 'function' || !activeStudentId()) return;
+  const studentId = activeStudentId();
+  const ext = mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm';
+  const path = `${studentId}/${voiceKey}.${ext}`;
+  const { error: upErr } = await sb.storage.from('voice-notes').upload(path, blob, { upsert: true, contentType: mime });
+  if (upErr) { console.warn('[voice upload]', upErr.message); return; }
+  const { data: { publicUrl } } = sb.storage.from('voice-notes').getPublicUrl(path);
+  await sb.from('coach_voice_notes').upsert({
+    student_id: studentId,
+    voice_key:  voiceKey,
+    storage_path: path,
+    public_url: publicUrl,
+  }, { onConflict: 'student_id,voice_key' });
+}
+
+async function _deleteVoiceFromSupabase(voiceKey) {
+  if (typeof sb === 'undefined' || typeof activeStudentId !== 'function' || !activeStudentId()) return;
+  const studentId = activeStudentId();
+  const { data: row } = await sb.from('coach_voice_notes')
+    .select('storage_path').eq('student_id', studentId).eq('voice_key', voiceKey).maybeSingle();
+  if (row && row.storage_path) await sb.storage.from('voice-notes').remove([row.storage_path]);
+  await sb.from('coach_voice_notes').delete().eq('student_id', studentId).eq('voice_key', voiceKey);
+}
+
+async function _loadVoiceFromSupabase(studentId) {
+  if (typeof sb === 'undefined') return;
+  const { data: rows } = await sb.from('coach_voice_notes').select('voice_key, public_url').eq('student_id', studentId);
+  if (!rows || !rows.length) return;
+  rows.forEach(row => {
+    // Only set if not already in localStorage (local is authoritative on this device)
+    if (!savedVoice[row.voice_key]) {
+      savedVoice[row.voice_key] = row.public_url;
+    }
+  });
+  localStorage.setItem(pk('voice'), JSON.stringify(savedVoice));
 }
 
 function drawWaveform(idx, exName) {
@@ -2760,6 +2818,10 @@ async function loadStudentData(studentId) {
     renderTraining();
     _renderSeanceFooter(currentDay + '_' + currentWeek);
   }
+
+  // Load voice notes from Supabase Storage (cross-device sharing)
+  await _loadVoiceFromSupabase(studentId);
+  renderTraining(); // re-render so newly loaded voice notes appear
 
   // Refresh graphs if the tab is currently visible
   if (document.getElementById('tab-graphs')?.classList.contains('active')) {
