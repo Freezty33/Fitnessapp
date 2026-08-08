@@ -474,7 +474,10 @@ function renderTraining() {
     // Voice recording
     const voiceKey = currentDay + '_' + ex.name;
     const hasVoice = !!savedVoice[voiceKey];
-    const voiceHtml = `
+    const _coachMode = typeof isCoach === 'function' && isCoach();
+    let voiceHtml = '';
+    if (_coachMode) {
+      voiceHtml = `
       <div class="ex-voice" id="voice-${i}">
         <span class="ex-voice-label">🎙 Coach</span>
         <button class="voice-btn${hasVoice ? ' has-audio' : ''}" id="voice-rec-${i}"
@@ -483,6 +486,13 @@ function renderTraining() {
         <canvas class="voice-waveform" id="voice-wave-${i}" width="120" height="28"></canvas>
         <button class="voice-delete-btn" onclick="deleteVoice(${i})" title="Supprimer">✕</button>` : ''}
       </div>`;
+    } else if (hasVoice) {
+      voiceHtml = `
+      <div class="ex-voice ex-voice-student" id="voice-${i}">
+        <span class="ex-voice-label">🎙 Coach</span>
+        <audio id="voice-audio-${i}" controls class="voice-audio-player"></audio>
+      </div>`;
+    }
 
     html += `
       <div class="exercise-card" id="ex-card-${i}">
