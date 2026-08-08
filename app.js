@@ -248,11 +248,14 @@ function closeMobileNav() {
 // TRAINING — SELECTORS (dynamic)
 // ============================================================
 function renderSelectors() {
-  // Day buttons
+  // Day buttons — hide days whose startWeek is after currentWeek
   const dayContainer = document.getElementById('day-btns-container');
   if (dayContainer) {
     let html = '';
     for (let d = 1; d <= dayCount; d++) {
+      const day = trainingData.days[d];
+      const startWeek = (day && day.startWeek) ? day.startWeek : 1;
+      if (startWeek > currentWeek) continue;
       html += `<button class="day-btn ${d === currentDay ? 'active' : ''}" onclick="selectDay(${d},this)">Jour ${d}</button>`;
     }
     dayContainer.innerHTML = html;
@@ -272,6 +275,15 @@ function selectWeek(w, btn) {
   currentWeek = w;
   document.querySelectorAll('#week-btns-container .week-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  // If currentDay is hidden for this week, fall back to the last visible day
+  const curDayStart = trainingData.days[currentDay] && trainingData.days[currentDay].startWeek;
+  if (curDayStart && curDayStart > w) {
+    for (let d = dayCount; d >= 1; d--) {
+      const sw = (trainingData.days[d] && trainingData.days[d].startWeek) || 1;
+      if (sw <= w) { currentDay = d; break; }
+    }
+  }
+  renderSelectors();
   renderTraining();
 }
 
@@ -297,7 +309,7 @@ function repeatTraining(sourceDay) {
     );
     return ex;
   });
-  trainingData.days[newId] = { label: `Jour ${newId}`, exercises: copiedExercises };
+  trainingData.days[newId] = { label: `Jour ${newId}`, exercises: copiedExercises, startWeek: currentWeek };
   persistTraining();
   persistCounts();
   currentDay = newId;
@@ -1673,7 +1685,11 @@ function renderBilanHistory() {
       const parts = key.split('_'); // "day_week"
       return { day: parseInt(parts[0]) || 0, week: parseInt(parts[1]) || 0, key, fb };
     })
-    .filter(e => e.day >= 1 && e.day <= dayCount && e.week >= 1 && e.week <= weekCount)
+    .filter(e => {
+      if (e.day < 1 || e.day > dayCount || e.week < 1 || e.week > weekCount) return false;
+      const sw = (trainingData.days[e.day] && trainingData.days[e.day].startWeek) || 1;
+      return e.week >= sw;
+    })
     .sort((a, b) => a.week !== b.week ? a.week - b.week : a.day - b.day);
 
   section.innerHTML = '';
