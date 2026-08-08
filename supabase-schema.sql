@@ -104,6 +104,29 @@ create table public.nutrition_plans (
   updated_at   timestamptz default now()
 );
 
+-- Extra (repeated) training sessions scoped to a specific week
+create table public.extra_trainings (
+  id             uuid primary key default gen_random_uuid(),
+  student_id     uuid not null references public.student_profiles(id) on delete cascade,
+  week_number    int  not null,
+  exercises_json jsonb not null default '[]',
+  created_at     timestamptz default now(),
+  unique(student_id, week_number)
+);
+alter table public.extra_trainings enable row level security;
+
+create policy "coach manages extra trainings"
+  on public.extra_trainings for all
+  using (public.i_coach(student_id))
+  with check (public.i_coach(student_id));
+
+create policy "student reads extra trainings"
+  on public.extra_trainings for select
+  using (exists(
+    select 1 from public.student_profiles
+    where id = student_id and user_id = auth.uid()
+  ));
+
 -- Coach voice notes linked to exercises (for cross-device sharing via Storage)
 create table public.coach_voice_notes (
   id           uuid primary key default gen_random_uuid(),

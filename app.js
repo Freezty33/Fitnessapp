@@ -52,6 +52,8 @@ let mealChecks = {};
 let savedVoice = {};
 // Workout feedback (keyed by "dayId_weekNum")
 let workoutFeedback = {};
+// Extra trainings per week (keyed by week number → {exercises:[...]})
+let extraTrainings = {};
 // MediaRecorder state
 let _recState = {};
 // Progress photos (keyed by "week_view" → data URL)
@@ -73,6 +75,7 @@ function loadProfileData() {
   mealChecks      = JSON.parse(localStorage.getItem(pk('mealChecks'))  || '{}');
   savedVoice      = JSON.parse(localStorage.getItem(pk('voice'))        || '{}');
   workoutFeedback = JSON.parse(localStorage.getItem(pk('feedback'))     || '{}');
+  extraTrainings  = JSON.parse(localStorage.getItem(pk('extraTrainings')) || '{}');
   progressPhotos  = JSON.parse(localStorage.getItem(pk('photos'))       || '{}');
   measurements    = JSON.parse(localStorage.getItem(pk('measurements')) || '[]');
   const savedNut = localStorage.getItem(pk('nutData'));
@@ -248,14 +251,10 @@ function closeMobileNav() {
 // TRAINING — SELECTORS (dynamic)
 // ============================================================
 function renderSelectors() {
-  // Day buttons — hide days whose startWeek is after currentWeek
   const dayContainer = document.getElementById('day-btns-container');
   if (dayContainer) {
     let html = '';
     for (let d = 1; d <= dayCount; d++) {
-      const day = trainingData.days[d];
-      const startWeek = (day && day.startWeek) ? day.startWeek : 1;
-      if (startWeek > currentWeek) continue;
       html += `<button class="day-btn ${d === currentDay ? 'active' : ''}" onclick="selectDay(${d},this)">Jour ${d}</button>`;
     }
     dayContainer.innerHTML = html;
@@ -275,14 +274,6 @@ function selectWeek(w, btn) {
   currentWeek = w;
   document.querySelectorAll('#week-btns-container .week-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  // If currentDay is hidden for this week, fall back to the last visible day
-  const curDayStart = trainingData.days[currentDay] && trainingData.days[currentDay].startWeek;
-  if (curDayStart && curDayStart > w) {
-    for (let d = dayCount; d >= 1; d--) {
-      const sw = (trainingData.days[d] && trainingData.days[d].startWeek) || 1;
-      if (sw <= w) { currentDay = d; break; }
-    }
-  }
   renderSelectors();
   renderTraining();
 }
@@ -294,27 +285,56 @@ function selectDay(d, btn) {
   renderTraining();
 }
 
-// Clone current day's exercises to a new day
+// Store a copy of today's exercises as an "Entraînement supplémentaire" for the current week only
 function repeatTraining(sourceDay) {
-  const newId = dayCount + 1;
-  dayCount++;
   const sourceExercises = (trainingData.days[sourceDay] || {}).exercises || [];
-  // Copy structure (name, tips) and week 1 targets only — other weeks start blank
   const copiedExercises = JSON.parse(JSON.stringify(sourceExercises)).map(ex => {
-    const firstWeek = (ex.weeks && ex.weeks[0]) || {};
-    ex.weeks = Array.from({ length: weekCount }, (_, wi) =>
-      wi === 0
-        ? { series: firstWeek.series ?? '', reps: firstWeek.reps ?? '', charge: firstWeek.charge ?? '', done: '' }
-        : { series: '', reps: '', charge: '', done: '' }
-    );
+    const wSlot = ex.weeks && ex.weeks[currentWeek - 1] || {};
+    ex.weeks = [{ series: wSlot.series ?? '', reps: wSlot.reps ?? '', charge: wSlot.charge ?? '', done: '' }];
     return ex;
   });
-  trainingData.days[newId] = { label: `Jour ${newId}`, exercises: copiedExercises, startWeek: currentWeek };
-  persistTraining();
-  persistCounts();
-  currentDay = newId;
-  renderSelectors();
+  extraTrainings[currentWeek] = { exercises: copiedExercises };
+  localStorage.setItem(pk('extraTrainings'), JSON.stringify(extraTrainings));
+  _saveExtraTrainingToSupabase(currentWeek);
   renderTraining();
+}
+
+function deleteExtraTraining() {
+  if (!confirm('Supprimer l\'entraînement supplémentaire de cette semaine ?')) return;
+  delete extraTrainings[currentWeek];
+  localStorage.setItem(pk('extraTrainings'), JSON.stringify(extraTrainings));
+  _deleteExtraTrainingFromSupabase(currentWeek);
+  renderTraining();
+}
+
+async function _saveExtraTrainingToSupabase(weekNum) {
+  if (typeof sb === 'undefined' || !activeStudentId()) return;
+  const studentId = activeStudentId();
+  const exercises = (extraTrainings[weekNum] || {}).exercises || [];
+  await sb.from('extra_trainings').upsert({
+    student_id:    studentId,
+    week_number:   weekNum,
+    exercises_json: exercises,
+  }, { onConflict: 'student_id,week_number' });
+}
+
+async function _deleteExtraTrainingFromSupabase(weekNum) {
+  if (typeof sb === 'undefined' || !activeStudentId()) return;
+  await sb.from('extra_trainings').delete()
+    .eq('student_id', activeStudentId())
+    .eq('week_number', weekNum);
+}
+
+async function _loadExtraTrainingsFromSupabase(studentId) {
+  if (typeof sb === 'undefined') return;
+  const { data: rows } = await sb.from('extra_trainings').select('week_number, exercises_json').eq('student_id', studentId);
+  if (!rows || !rows.length) return;
+  rows.forEach(row => {
+    if (!extraTrainings[row.week_number]) {
+      extraTrainings[row.week_number] = { exercises: row.exercises_json || [] };
+    }
+  });
+  localStorage.setItem(pk('extraTrainings'), JSON.stringify(extraTrainings));
 }
 
 // Add / remove days
@@ -621,6 +641,27 @@ function renderTraining() {
         ${(fb.pain||[]).length ? `<p class="bilan-summary-pain">🔴 ${fb.pain.length} zone${fb.pain.length > 1 ? 's' : ''} douloureuse${fb.pain.length > 1 ? 's' : ''} marquée${fb.pain.length > 1 ? 's' : ''}</p>` : ''}
       </div>` : ''}
     </div>`;
+
+  // Entraînement supplémentaire — only for currentWeek
+  const extra = extraTrainings[currentWeek];
+  if (extra && extra.exercises && extra.exercises.length) {
+    const exRows = extra.exercises.map((ex, ei) => {
+      const w = ex.weeks && ex.weeks[0] || {};
+      return `<div class="extra-ex-row">
+        <span class="extra-ex-num">${ei + 1}</span>
+        <span class="extra-ex-name">${h(ex.name)}</span>
+        <span class="extra-ex-meta">${w.series ? w.series + ' séries' : ''}${w.reps ? ' · ' + w.reps + ' reps' : ''}${w.charge ? ' · ' + w.charge + ' kg' : ''}</span>
+      </div>`;
+    }).join('');
+    html += `
+    <div class="extra-training-card">
+      <div class="extra-training-header">
+        <span class="extra-training-title">🔁 Entraînement supplémentaire — Semaine ${currentWeek}</span>
+        <button class="extra-training-delete" onclick="deleteExtraTraining()" title="Supprimer">✕</button>
+      </div>
+      <div class="extra-training-exercises">${exRows}</div>
+    </div>`;
+  }
 
   grid.innerHTML = html;
   // Set audio src and wire custom player after render
@@ -2923,6 +2964,9 @@ async function loadStudentData(studentId) {
     renderTraining();
     _renderSeanceFooter(currentDay + '_' + currentWeek);
   }
+
+  // Load extra trainings from Supabase
+  await _loadExtraTrainingsFromSupabase(studentId);
 
   // Load voice notes from Supabase Storage (cross-device sharing)
   await _loadVoiceFromSupabase(studentId);
