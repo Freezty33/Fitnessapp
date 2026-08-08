@@ -1659,12 +1659,14 @@ function renderBilanHistory() {
   if (!section) return;
 
   // Collect all feedback entries sorted by week then day
+  // Filter to only days/weeks that currently exist in the plan
   const entries = Object.entries(workoutFeedback)
     .filter(([, fb]) => fb && (fb.rating > 0 || (fb.note || '').trim() || (fb.pain || []).length))
     .map(([key, fb]) => {
       const parts = key.split('_'); // "day_week"
       return { day: parseInt(parts[0]) || 0, week: parseInt(parts[1]) || 0, key, fb };
     })
+    .filter(e => e.day >= 1 && e.day <= dayCount && e.week >= 1 && e.week <= weekCount)
     .sort((a, b) => a.week !== b.week ? a.week - b.week : a.day - b.day);
 
   section.innerHTML = '';
@@ -2878,6 +2880,20 @@ async function loadStudentData(studentId) {
         workoutFeedback[key] = { rating: fb.rating || 0, note: fb.note || '', pain: fb.pain_points || [] };
       }
     });
+  }
+
+  // Purge any feedback keys that reference days/weeks beyond the current plan
+  // (handles the case where Supabase re-fetched rows for already-deleted days)
+  const orphanKeys = Object.keys(workoutFeedback).filter(key => {
+    const [kd, kw] = key.split('_').map(Number);
+    return kd < 1 || kd > dayCount || kw < 1 || kw > weekCount;
+  });
+  orphanKeys.forEach(key => _deleteFeedbackKey(key));
+  if (orphanKeys.length) {
+    localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+  }
+
+  if (feedback && feedback.length || orphanKeys.length) {
     localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
     // Re-render so all days' footers reflect the merged feedback data,
     // then re-patch the current footer in case the user saved a bilan mid-flight.
