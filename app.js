@@ -318,12 +318,41 @@ function addDay() {
 }
 
 function removeDay() {
-  if (dayCount <= 1) return;
-  if (!confirm(`Supprimer Jour ${dayCount} et tous ses exercices ?`)) return;
-  delete trainingData.days[dayCount];
-  persistTraining();
+  const d = currentDay;
+  if (dayCount <= 1) {
+    if (!confirm(`Effacer tous les exercices de Jour 1 ?`)) return;
+    trainingData.days[1] = { label: 'Jour 1', exercises: [] };
+    for (let w = 1; w <= weekCount; w++) _deleteFeedbackKey(`1_${w}`);
+    localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+    persistTraining();
+    renderTraining();
+    return;
+  }
+  if (!confirm(`Supprimer Jour ${d} et tous ses exercices ?`)) return;
+  // Delete feedback for the removed day
+  for (let w = 1; w <= weekCount; w++) _deleteFeedbackKey(`${d}_${w}`);
+  // Shift feedback keys for days above d down by one
+  const newFeedback = {};
+  Object.keys(workoutFeedback).forEach(key => {
+    const [kd, kw] = key.split('_').map(Number);
+    if (kd === d) return; // already deleted above
+    const newKey = kd > d ? `${kd - 1}_${kw}` : key;
+    newFeedback[newKey] = workoutFeedback[key];
+  });
+  workoutFeedback = newFeedback;
+  localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+  // Shift days
+  const newDays = {};
+  for (let i = 1; i <= dayCount; i++) {
+    if (i === d) continue;
+    const dest = i < d ? i : i - 1;
+    newDays[dest] = trainingData.days[i] || { label: `Jour ${dest}`, exercises: [] };
+    newDays[dest].label = `Jour ${dest}`;
+  }
+  trainingData.days = newDays;
   dayCount--;
-  if (currentDay > dayCount) currentDay = dayCount;
+  currentDay = Math.min(d, dayCount);
+  persistTraining();
   persistCounts();
   renderSelectors();
   renderTraining();
@@ -346,17 +375,43 @@ function addWeek() {
 }
 
 function removeWeek() {
-  if (weekCount <= 1) return;
-  if (!confirm(`Supprimer la Semaine ${weekCount} et toutes ses données ?`)) return;
-  // Trim each exercise's weeks array
-  Object.values(trainingData.days).forEach(day => {
-    day.exercises.forEach(ex => {
-      if (ex.weeks.length >= weekCount) ex.weeks.splice(weekCount - 1, 1);
+  const w = currentWeek;
+  if (weekCount <= 1) {
+    if (!confirm(`Effacer toutes les données de S1 ?`)) return;
+    Object.values(trainingData.days).forEach(day => {
+      day.exercises.forEach(ex => {
+        ex.weeks = [{ series: '', reps: '', charge: '', done: '' }];
+      });
     });
+    for (let d = 1; d <= dayCount; d++) _deleteFeedbackKey(`${d}_1`);
+    localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+    currentWeek = 1;
+    persistTraining();
+    persistCounts();
+    renderSelectors();
+    renderTraining();
+    return;
+  }
+  if (!confirm(`Supprimer S${w} et toutes ses données ?`)) return;
+  // Delete feedback for the removed week
+  for (let d = 1; d <= dayCount; d++) _deleteFeedbackKey(`${d}_${w}`);
+  // Shift feedback keys for weeks above w down by one
+  const newFeedback = {};
+  Object.keys(workoutFeedback).forEach(key => {
+    const [kd, kw] = key.split('_').map(Number);
+    if (kw === w) return; // already deleted above
+    const newKey = kw > w ? `${kd}_${kw - 1}` : key;
+    newFeedback[newKey] = workoutFeedback[key];
   });
-  persistTraining();
+  workoutFeedback = newFeedback;
+  localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+  // Remove the selected week from every exercise
+  Object.values(trainingData.days).forEach(day => {
+    day.exercises.forEach(ex => { ex.weeks.splice(w - 1, 1); });
+  });
   weekCount--;
-  if (currentWeek > weekCount) currentWeek = weekCount;
+  currentWeek = Math.min(w, weekCount);
+  persistTraining();
   persistCounts();
   renderSelectors();
   renderTraining();
@@ -368,8 +423,7 @@ function removeWeek() {
 function renderTraining() {
   stopAllTimers();
   const grid = document.getElementById('training-grid');
-  const dayData = trainingData.days[currentDay];
-  if (!dayData) return;
+  const dayData = trainingData.days[currentDay] || { label: `Jour ${currentDay}`, exercises: [] };
   const wIdx = currentWeek - 1;
 
   let html = `
@@ -754,9 +808,73 @@ function clearPain(fbKey) {
 // ============================================================
 // BILAN OVERLAY
 // ============================================================
+
+// Patches seance-footer DOM in-place after a bilan save — avoids full renderTraining()
+// which could race against async Supabase fetches and wipe the just-saved feedback.
+function _renderSeanceFooter(fbKey) {
+  const footer = document.getElementById('seance-footer');
+  if (!footer) return;
+  const fb = workoutFeedback[fbKey] || { rating: 0, note: '', pain: [] };
+  const hasFeedback = fb.rating > 0 || (fb.note || '').trim() || (fb.pain || []).length;
+
+  // Update the main action button
+  const btn = footer.querySelector('.btn-seance-terminee');
+  if (btn) btn.textContent = hasFeedback ? '✏️ Modifier le bilan' : '✅ Séance terminée';
+
+  // Remove existing summary if present
+  const existing = footer.querySelector('.bilan-summary');
+  if (existing) existing.remove();
+
+  if (!hasFeedback) return;
+
+  // Build summary card
+  const summary = document.createElement('div');
+  summary.id = 'bilan-summary';
+  summary.className = 'bilan-summary';
+
+  const summaryHeader = document.createElement('div');
+  summaryHeader.className = 'bilan-summary-header';
+
+  const titleSpan = document.createElement('span');
+  titleSpan.className = 'bilan-summary-title';
+  titleSpan.textContent = 'Bilan de la séance';
+
+  const starsDiv = document.createElement('div');
+  starsDiv.className = 'sum-stars';
+  [1,2,3,4,5].forEach(n => {
+    const s = document.createElement('span');
+    s.className = 'sum-star' + (n <= fb.rating ? ' lit' : '');
+    s.textContent = '★';
+    starsDiv.appendChild(s);
+  });
+
+  summaryHeader.appendChild(titleSpan);
+  summaryHeader.appendChild(starsDiv);
+  summary.appendChild(summaryHeader);
+
+  if ((fb.note || '').trim()) {
+    const noteEl = document.createElement('p');
+    noteEl.className = 'bilan-summary-note';
+    noteEl.textContent = fb.note;
+    summary.appendChild(noteEl);
+  }
+
+  if ((fb.pain || []).length) {
+    const painEl = document.createElement('p');
+    painEl.className = 'bilan-summary-pain';
+    const n = fb.pain.length;
+    painEl.textContent = `🔴 ${n} zone${n > 1 ? 's' : ''} douloureuse${n > 1 ? 's' : ''} marquée${n > 1 ? 's' : ''}`;
+    summary.appendChild(painEl);
+  }
+
+  footer.appendChild(summary);
+}
+
 function openBilanOverlay(fbKey) {
   if (document.getElementById('bilan-overlay')) return;
-  const fb = workoutFeedback[fbKey] || { rating: 0, note: '', pain: [] };
+  // Anchor fb in workoutFeedback immediately so all mutations (rating, pain, note) share the same object
+  if (!workoutFeedback[fbKey]) workoutFeedback[fbKey] = { rating: 0, note: '', pain: [] };
+  const fb = workoutFeedback[fbKey];
 
   const overlay = document.createElement('div');
   overlay.id = 'bilan-overlay';
@@ -864,7 +982,22 @@ function openBilanOverlay(fbKey) {
     localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
     _saveFeedbackToSupabase(fbKey, fb);
     overlay.remove();
-    renderTraining();
+    _renderSeanceFooter(fbKey);
+  });
+
+  // Delete button — only shown when a bilan already exists
+  const hasSaved = fb.rating > 0 || (fb.note || '').trim() || (fb.pain || []).length;
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'btn-bilan-delete';
+  deleteBtn.textContent = 'Supprimer le bilan';
+  deleteBtn.style.display = hasSaved ? '' : 'none';
+  deleteBtn.addEventListener('click', () => {
+    if (!confirm('Supprimer définitivement ce bilan de séance ?')) return;
+    delete workoutFeedback[fbKey];
+    localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+    _deleteFeedbackFromSupabase(fbKey);
+    overlay.remove();
+    _renderSeanceFooter(fbKey);
   });
 
   const scrollBody = document.createElement('div');
@@ -875,6 +1008,7 @@ function openBilanOverlay(fbKey) {
   scrollBody.appendChild(bodyWrap);
   scrollBody.appendChild(painControls);
   scrollBody.appendChild(saveBtn);
+  scrollBody.appendChild(deleteBtn);
 
   box.appendChild(header);
   box.appendChild(scrollBody);
@@ -1133,11 +1267,14 @@ function playBeep() {
 // ADD / DELETE EXERCISE
 // ============================================================
 function addExercise() {
+  if (!trainingData.days[currentDay]) {
+    trainingData.days[currentDay] = { label: `Jour ${currentDay}`, exercises: [] };
+  }
   const dayData = trainingData.days[currentDay];
   dayData.exercises.push({
     name: 'Nouvel exercice',
     tips: '',
-    weeks: Array.from({ length: 5 }, () => ({ series: 3, reps: '10-12', charge: '', done: '' }))
+    weeks: Array.from({ length: weekCount || 1 }, () => ({ series: 3, reps: '10-12', charge: '', done: '' }))
   });
   persistTraining();
   renderTraining();
@@ -1607,15 +1744,50 @@ function addDataEntry() {
   }
 }
 
+function _buildExerciseProgress() {
+  // Build {exerciseName: [chargeS1, chargeS2, ...]} from current trainingData
+  const map = {};
+  Object.values(trainingData.days).forEach(day => {
+    (day.exercises || []).forEach(ex => {
+      if (!ex.name) return;
+      if (!map[ex.name]) map[ex.name] = Array(weekCount).fill(null);
+      (ex.weeks || []).forEach((w, i) => {
+        if (i < weekCount) {
+          const v = parseFloat(w.charge);
+          if (!isNaN(v) && v > 0) map[ex.name][i] = v;
+        }
+      });
+    });
+  });
+  return map;
+}
+
+function _refreshExerciseSelect() {
+  const sel = document.getElementById('exercise-select');
+  if (!sel) return;
+  const current = sel.value;
+  const names = [];
+  Object.values(trainingData.days).forEach(day => {
+    (day.exercises || []).forEach(ex => { if (ex.name && !names.includes(ex.name)) names.push(ex.name); });
+  });
+  // Replace options while keeping any static ones that are still valid
+  const all = [...new Set([...names])];
+  sel.innerHTML = all.map(n => `<option value="${h(n)}"${n === current ? ' selected' : ''}>${h(n)}</option>`).join('');
+}
+
 function updateExerciseChart() {
-  const exName = document.getElementById('exercise-select').value;
-  const data   = exerciseProgress[exName] || [];
+  _refreshExerciseSelect();
+  const sel    = document.getElementById('exercise-select');
+  const exName = sel ? sel.value : '';
+  const progress = _buildExerciseProgress();
+  const data   = (progress[exName] || []).slice(0, weekCount);
+  const labels = Array.from({ length: weekCount }, (_, i) => 'S' + (i + 1));
   const ctx    = document.getElementById('chart-exercise').getContext('2d');
   if (charts['chart-exercise']) charts['chart-exercise'].destroy();
   charts['chart-exercise'] = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: ['S1','S2','S3','S4','S5'],
+      labels,
       datasets: [{ label: 'Charge (kg)', data,
         backgroundColor: 'rgba(200,255,0,0.65)',
         borderColor: '#C8FF00', borderWidth: 1, borderRadius: 6 }]
@@ -2503,11 +2675,20 @@ async function onStudentSwitch(studentId) {
 async function loadStudentData(studentId) {
   if (!studentId || typeof sb === 'undefined') return;
 
+  const switchingStudent = currentProfileId !== studentId;
+
   // Namespace all localStorage keys under this student's ID
   currentProfileId = studentId;
 
-  // Paint immediately from localStorage cache for this student
-  loadProfileData();
+  // Paint immediately from localStorage cache — only reset nav when switching students
+  if (switchingStudent) {
+    loadProfileData(); // resets currentDay/currentWeek to 1
+  } else {
+    // Reload data but preserve current navigation position
+    const savedDay = currentDay, savedWeek = currentWeek;
+    loadProfileData();
+    currentDay = savedDay; currentWeek = savedWeek;
+  }
   renderSelectors();
   renderTraining();
 
@@ -2520,14 +2701,21 @@ async function loadStudentData(studentId) {
     .maybeSingle();
 
   if (plan) {
-    weekCount = plan.week_count;
-    dayCount  = plan.day_count;
-    trainingData.days = _adaptPlanToLocal(plan);
-    localStorage.setItem(pk('training'),   JSON.stringify(trainingData.days));
-    localStorage.setItem(pk('weekCount'),  weekCount);
-    localStorage.setItem(pk('dayCount'),   dayCount);
-    renderSelectors();
-    renderTraining();
+    // Only use Supabase plan if there is no locally-saved training for this student.
+    // Once a student's plan exists in localStorage it is the source of truth —
+    // Supabase is used only for first-load on a new device.
+    const hasLocal = !!localStorage.getItem(pk('training'));
+    if (!hasLocal) {
+      weekCount = plan.week_count;
+      dayCount  = plan.day_count;
+      trainingData.days = _adaptPlanToLocal(plan);
+      localStorage.setItem(pk('training'),  JSON.stringify(trainingData.days));
+      localStorage.setItem(pk('weekCount'), weekCount);
+      localStorage.setItem(pk('dayCount'),  dayCount);
+      renderSelectors();
+      renderTraining();
+      _renderSeanceFooter(currentDay + '_' + currentWeek);
+    }
   }
 
   // Fetch body metrics
@@ -2548,29 +2736,8 @@ async function loadStudentData(studentId) {
     localStorage.setItem(pk('progress'), JSON.stringify(savedProgress));
   }
 
-  // Fetch exercise logs and populate week fields
-  const { data: logs } = await sb
-    .from('exercise_logs')
-    .select('*')
-    .eq('student_id', studentId);
-
-  if (logs && logs.length) {
-    logs.forEach(log => {
-      const wIdx = (log.week_number || 1) - 1;
-      Object.values(trainingData.days).forEach(day => {
-        day.exercises.forEach(ex => {
-          if (ex.name !== log.exercise_name) return;
-          while (ex.weeks.length <= wIdx) ex.weeks.push({ series:'', reps:'', charge:'', done:'' });
-          if (log.series_done) ex.weeks[wIdx].series = log.series_done;
-          if (log.reps_done)   ex.weeks[wIdx].reps   = log.reps_done;
-          if (log.charge_kg)   ex.weeks[wIdx].charge = log.charge_kg;
-          if (log.completed)   ex.weeks[wIdx].done   = '✓';
-        });
-      });
-    });
-    localStorage.setItem(pk('training'), JSON.stringify(trainingData.days));
-    renderTraining();
-  }
+  // exercise_logs are not applied here — logs lack day_number so applying them
+  // by name alone would corrupt days that share the same exercise.
 
   // Fetch session feedback
   const { data: feedback } = await sb
@@ -2579,11 +2746,24 @@ async function loadStudentData(studentId) {
     .eq('student_id', studentId);
 
   if (feedback && feedback.length) {
+    // Merge: Supabase data fills gaps but never overwrites an entry already saved locally this session
     feedback.forEach(fb => {
       const key = fb.day_number + '_' + fb.week_number;
-      workoutFeedback[key] = { rating: fb.rating || 0, note: fb.note || '', pain: fb.pain_points || [] };
+      const hadLocal = !!(workoutFeedback[key] && (workoutFeedback[key].rating > 0 || (workoutFeedback[key].note || '').trim() || (workoutFeedback[key].pain || []).length));
+      if (!hadLocal) {
+        workoutFeedback[key] = { rating: fb.rating || 0, note: fb.note || '', pain: fb.pain_points || [] };
+      }
     });
     localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+    // Re-render so all days' footers reflect the merged feedback data,
+    // then re-patch the current footer in case the user saved a bilan mid-flight.
+    renderTraining();
+    _renderSeanceFooter(currentDay + '_' + currentWeek);
+  }
+
+  // Refresh graphs if the tab is currently visible
+  if (document.getElementById('tab-graphs')?.classList.contains('active')) {
+    initCharts();
   }
 }
 
@@ -2617,11 +2797,265 @@ async function _saveFeedbackToSupabase(fbKey, fb) {
     student_id:  activeStudentId(),
     day_number:  day,
     week_number: week,
-    rating:      fb.rating || 0,
+    rating:      fb.rating || null,
     note:        fb.note   || '',
     pain_points: fb.pain   || []
   }, { onConflict: 'student_id,day_number,week_number' });
   if (error) console.warn('[sync] feedback', error.message);
+}
+
+function _deleteFeedbackKey(fbKey) {
+  delete workoutFeedback[fbKey];
+  _deleteFeedbackFromSupabase(fbKey);
+}
+
+async function _deleteFeedbackFromSupabase(fbKey) {
+  if (typeof sb === 'undefined' || !activeStudentId()) return;
+  const [day, week] = fbKey.split('_').map(Number);
+  const { error } = await sb.from('session_feedback')
+    .delete()
+    .eq('student_id', activeStudentId())
+    .eq('day_number',  day)
+    .eq('week_number', week);
+  if (error) console.warn('[sync] feedback delete', error.message);
+}
+
+// ============================================================
+// PDF EXPORT
+// ============================================================
+function downloadPlanPDF() {
+  const studentName = (typeof myProfile === 'function' && myProfile())
+    ? myProfile().full_name || 'Programme'
+    : 'Programme';
+
+  // Build one section per day for the current week
+  const wIdx = currentWeek - 1;
+  let daysSections = '';
+  for (let d = 1; d <= dayCount; d++) {
+    const day = trainingData.days[d];
+    if (!day) continue;
+    const exercises = (day.exercises || []);
+    if (!exercises.length) continue;
+
+    let rows = '';
+    exercises.forEach((ex, i) => {
+      const w = ex.weeks[wIdx] || {};
+      const series = w.series !== undefined && w.series !== '' ? w.series : '—';
+      const reps   = w.reps   !== undefined && w.reps   !== '' ? w.reps   : '—';
+      const charge = w.charge !== undefined && w.charge !== '' ? w.charge + ' kg' : '—';
+      const done   = w.done   !== undefined && w.done   !== '' ? `<span class="done-tick">✓ ${h(String(w.done))}</span>` : '';
+      rows += `
+        <tr class="${i % 2 === 0 ? 'row-even' : 'row-odd'}">
+          <td class="ex-num">${i + 1}</td>
+          <td class="ex-name-cell">
+            <span class="ex-title">${h(ex.name)}</span>
+            ${ex.tips ? `<span class="ex-tips">${h(ex.tips)}</span>` : ''}
+          </td>
+          <td class="metric-cell">${h(String(series))}</td>
+          <td class="metric-cell">${h(String(reps))}</td>
+          <td class="metric-cell">${h(String(charge))}</td>
+          <td class="metric-cell done-cell">${done}</td>
+        </tr>`;
+    });
+
+    const feedback = workoutFeedback[`${d}_${currentWeek}`];
+    let bilanHtml = '';
+    if (feedback && (feedback.rating > 0 || (feedback.note || '').trim())) {
+      const stars = [1,2,3,4,5].map(n => `<span style="color:${n <= feedback.rating ? '#FFB800' : '#444'}">★</span>`).join('');
+      bilanHtml = `
+        <div class="bilan-row">
+          <span class="bilan-label">Bilan :</span>
+          <span class="bilan-stars">${stars}</span>
+          ${feedback.note ? `<span class="bilan-note">${h(feedback.note)}</span>` : ''}
+        </div>`;
+    }
+
+    daysSections += `
+      <div class="day-section">
+        <div class="day-header-pdf">
+          <span class="day-title">${h(day.label || `Jour ${d}`)}</span>
+          <span class="day-badge">Semaine ${currentWeek}</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th class="th-num">#</th>
+              <th class="th-name">Exercice</th>
+              <th>Séries</th>
+              <th>Reps</th>
+              <th>Charge</th>
+              <th>Réalisé</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${bilanHtml}
+      </div>`;
+  }
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Programme — ${h(studentName)} — Semaine ${currentWeek}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    background: #0a0a0a;
+    color: #e8e8e8;
+    padding: 40px 48px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  /* ── Header ── */
+  .pdf-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 36px;
+    border-bottom: 2px solid #C8FF00;
+    padding-bottom: 16px;
+  }
+  .pdf-logo { font-size: 28px; font-weight: 900; letter-spacing: -1px; color: #fff; }
+  .pdf-logo span { color: #C8FF00; }
+  .pdf-meta { text-align: right; }
+  .pdf-student { font-size: 18px; font-weight: 700; color: #C8FF00; }
+  .pdf-week { font-size: 12px; color: #777; margin-top: 2px; }
+
+  /* ── Day section ── */
+  .day-section { margin-bottom: 32px; break-inside: avoid; }
+  .day-header-pdf {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .day-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .day-badge {
+    font-size: 10px;
+    font-weight: 700;
+    color: #000;
+    background: #C8FF00;
+    border-radius: 4px;
+    padding: 2px 8px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  /* ── Table ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  thead tr {
+    background: #1a1a1a;
+  }
+  th {
+    padding: 9px 12px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #777;
+    text-align: center;
+  }
+  .th-num  { width: 36px; }
+  .th-name { text-align: left; width: 40%; }
+  td { padding: 10px 12px; vertical-align: top; }
+  .row-even { background: #111; }
+  .row-odd  { background: #0e0e0e; }
+  .ex-num {
+    width: 36px;
+    text-align: center;
+    color: #C8FF00;
+    font-weight: 700;
+    font-size: 12px;
+  }
+  .ex-name-cell { text-align: left; }
+  .ex-title { font-weight: 600; color: #e8e8e8; display: block; }
+  .ex-tips  { font-size: 11px; color: #666; display: block; margin-top: 2px; font-style: italic; }
+  .metric-cell {
+    text-align: center;
+    font-weight: 600;
+    color: #ccc;
+    font-size: 13px;
+  }
+  .done-cell { color: #C8FF00; }
+  .done-tick { font-size: 11px; }
+
+  /* ── Bilan ── */
+  .bilan-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: #111;
+    border-left: 3px solid #C8FF00;
+    border-radius: 0 6px 6px 0;
+    font-size: 12px;
+  }
+  .bilan-label { color: #777; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
+  .bilan-stars { font-size: 14px; }
+  .bilan-note { color: #aaa; font-style: italic; }
+
+  /* ── Footer ── */
+  .pdf-footer {
+    margin-top: 40px;
+    padding-top: 12px;
+    border-top: 1px solid #1e1e1e;
+    font-size: 10px;
+    color: #444;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  @media print {
+    body { background: #0a0a0a !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .day-section { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+  <div class="pdf-header">
+    <div class="pdf-logo">LOUIS<span>FIT</span></div>
+    <div class="pdf-meta">
+      <div class="pdf-student">${h(studentName)}</div>
+      <div class="pdf-week">Semaine ${currentWeek} · ${dayCount} jour${dayCount > 1 ? 's' : ''} · ${weekCount} semaine${weekCount > 1 ? 's' : ''}</div>
+    </div>
+  </div>
+
+  ${daysSections || '<p style="color:#555;text-align:center;padding:40px 0">Aucun exercice dans ce programme.</p>'}
+
+  <div class="pdf-footer">
+    <span>LouisFIT — Programme personnalisé</span>
+    <span>Semaine ${currentWeek} / ${weekCount}</span>
+  </div>
+</body>
+</html>`;
+
+  // Open in a hidden iframe and trigger print-to-PDF
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:210mm;height:297mm;border:none;';
+  document.body.appendChild(iframe);
+  iframe.contentDocument.open();
+  iframe.contentDocument.write(html);
+  iframe.contentDocument.close();
+  iframe.contentWindow.focus();
+  setTimeout(() => {
+    iframe.contentWindow.print();
+    setTimeout(() => iframe.remove(), 2000);
+  }, 600);
 }
 
 // ============================================================

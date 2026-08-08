@@ -62,7 +62,9 @@ function _hideSignOutButton() {
   if (btnM) btnM.style.display = 'none';
 }
 
-// ── Coach student switcher (desktop header + mobile drawer) ───
+// ── Coach student switcher ────────────────────────────────────
+let _students = [];
+
 async function _buildCoachSwitcher() {
   const { data: students, error: swErr } = await sb
     .from('student_profiles')
@@ -71,10 +73,8 @@ async function _buildCoachSwitcher() {
 
   if (swErr) { console.error('[switcher]', swErr.message); }
 
-  const controls     = document.getElementById('coach-header-controls');
-  const drawerCtrls  = document.getElementById('coach-drawer-controls');
-  const sel          = document.getElementById('coach-student-select');
-  const selMobile    = document.getElementById('coach-student-select-mobile');
+  const controls    = document.getElementById('coach-header-controls');
+  const drawerCtrls = document.getElementById('coach-drawer-controls');
 
   if (!students || !students.length) {
     if (controls)    controls.style.display    = 'none';
@@ -82,47 +82,105 @@ async function _buildCoachSwitcher() {
     return;
   }
 
-  // Populate both selects
-  [sel, selMobile].forEach(s => {
-    if (!s) return;
-    while (s.firstChild) s.removeChild(s.firstChild);
-    students.forEach(st => {
-      const opt = document.createElement('option');
-      opt.value = st.id;
-      const prof = st['profiles!student_profiles_user_id_fkey'] || st.profiles;
-      opt.textContent = (prof && prof.full_name) ? prof.full_name : st.id;
-      s.appendChild(opt);
-    });
+  _students = students.map(st => {
+    const prof = st['profiles!student_profiles_user_id_fkey'] || st.profiles;
+    return { id: st.id, name: (prof && prof.full_name) ? prof.full_name : st.id };
   });
 
-  const onSwitch = (id) => {
-    _viewingStudentId = id;
-    // Keep both selects in sync
-    if (sel)       sel.value       = id;
-    if (selMobile) selMobile.value = id;
-    if (typeof onStudentSwitch === 'function') onStudentSwitch(id);
-  };
+  _viewingStudentId = _students[0].id;
+  _renderStudentSwitcher();
 
-  if (sel)       sel.onchange       = () => onSwitch(sel.value);
-  if (selMobile) selMobile.onchange = () => onSwitch(selMobile.value);
-
-  _viewingStudentId = students[0].id;
   if (controls)    controls.style.display    = 'flex';
   if (drawerCtrls) drawerCtrls.style.display = 'block';
 }
 
+function _renderStudentSwitcher() {
+  const current = _students.find(s => s.id === _viewingStudentId) || _students[0];
+
+  // Desktop pill label
+  const label = document.getElementById('student-switcher-label');
+  if (label) label.textContent = current ? current.name : '—';
+
+  // Desktop dropdown items
+  const dropdown = document.getElementById('student-switcher-dropdown');
+  if (dropdown) {
+    dropdown.innerHTML = '';
+    _students.forEach(st => {
+      const item = document.createElement('button');
+      item.className = 'student-switcher-item' + (st.id === _viewingStudentId ? ' active' : '');
+      const avatar = document.createElement('span');
+      avatar.className = 'student-switcher-avatar';
+      avatar.textContent = st.name.charAt(0).toUpperCase();
+      const name = document.createElement('span');
+      name.textContent = st.name;
+      item.appendChild(avatar);
+      item.appendChild(name);
+      item.addEventListener('click', () => {
+        _closeStudentDropdown();
+        _viewingStudentId = st.id;
+        _renderStudentSwitcher();
+        if (typeof onStudentSwitch === 'function') onStudentSwitch(st.id);
+      });
+      dropdown.appendChild(item);
+    });
+  }
+
+  // Mobile list
+  const mobileWrap = document.getElementById('student-switcher-mobile');
+  if (mobileWrap) {
+    mobileWrap.innerHTML = '';
+    _students.forEach(st => {
+      const item = document.createElement('button');
+      item.className = 'student-switcher-item' + (st.id === _viewingStudentId ? ' active' : '');
+      item.style.cssText = 'width:100%;margin-bottom:4px';
+      const avatar = document.createElement('span');
+      avatar.className = 'student-switcher-avatar';
+      avatar.textContent = st.name.charAt(0).toUpperCase();
+      const name = document.createElement('span');
+      name.textContent = st.name;
+      item.appendChild(avatar);
+      item.appendChild(name);
+      item.addEventListener('click', () => {
+        _viewingStudentId = st.id;
+        _renderStudentSwitcher();
+        if (typeof onStudentSwitch === 'function') onStudentSwitch(st.id);
+        if (typeof closeMobileNav === 'function') closeMobileNav();
+      });
+      mobileWrap.appendChild(item);
+    });
+  }
+}
+
+function _toggleStudentDropdown() {
+  const dd = document.getElementById('student-switcher-dropdown');
+  if (!dd) return;
+  const open = dd.classList.toggle('open');
+  if (open) {
+    setTimeout(() => document.addEventListener('click', _studentDropdownOutside), 0);
+  }
+}
+
+function _closeStudentDropdown() {
+  const dd = document.getElementById('student-switcher-dropdown');
+  if (dd) dd.classList.remove('open');
+  document.removeEventListener('click', _studentDropdownOutside);
+}
+
+function _studentDropdownOutside(e) {
+  const sw = document.getElementById('student-switcher');
+  if (sw && !sw.contains(e.target)) _closeStudentDropdown();
+}
+
+// Keep _confirmDeleteStudent working — reads current selected student from _viewingStudentId
+
+
 // ── Delete student ────────────────────────────────────────────
 function _confirmDeleteStudent() {
-  const sel  = document.getElementById('coach-student-select');
-  const selM = document.getElementById('coach-student-select-mobile');
-  const id   = (sel && sel.value) || (selM && selM.value);
-  const name = (sel && sel.options[sel.selectedIndex]?.textContent)
-             || (selM && selM.options[selM.selectedIndex]?.textContent)
-             || 'cet étudiant';
+  const id   = _viewingStudentId;
+  const st   = _students.find(s => s.id === id);
+  const name = st ? st.name : 'cet étudiant';
   if (!id) return;
-
   if (!confirm(`Supprimer définitivement le profil de ${name} ?\nToutes les données seront effacées.`)) return;
-
   _doDeleteStudent(id, name);
 }
 
@@ -141,10 +199,7 @@ async function _doDeleteStudent(studentProfileId, name) {
       localStorage.removeItem(`p_${studentProfileId}_${k}`);
     });
     await _buildCoachSwitcher();
-    // Switch to first remaining student if any
-    const sel = document.getElementById('coach-student-select');
-    if (sel && sel.options.length > 0 && typeof onStudentSwitch === 'function') {
-      _viewingStudentId = sel.value;
+    if (_students.length > 0 && typeof onStudentSwitch === 'function') {
       onStudentSwitch(_viewingStudentId);
     }
   } catch (e) {
@@ -232,13 +287,12 @@ function _showCreateStudentModal() {
       overlay.remove();
       await _buildCoachSwitcher();
 
-      // Auto-select the new student (check both selects)
-      for (const selId of ['coach-student-select', 'coach-student-select-mobile']) {
-        const sel = document.getElementById(selId);
-        if (!sel) continue;
-        for (const opt of sel.options) {
-          if (opt.textContent === name) { sel.value = opt.value; sel.dispatchEvent(new Event('change')); break; }
-        }
+      // Auto-select the newly created student by name
+      const newSt = _students.find(s => s.name === name);
+      if (newSt && typeof onStudentSwitch === 'function') {
+        _viewingStudentId = newSt.id;
+        _renderStudentSwitcher();
+        onStudentSwitch(newSt.id);
       }
     } catch (e) {
       errEl.textContent = e.message;

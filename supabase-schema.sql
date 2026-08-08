@@ -110,7 +110,7 @@ create table public.session_feedback (
   student_id  uuid not null references public.student_profiles(id) on delete cascade,
   day_number  int  not null,
   week_number int  not null,
-  rating      int  check (rating between 1 and 5),
+  rating      int  check (rating is null or rating between 0 and 5),
   note        text,
   pain_points jsonb default '[]',
   created_at  timestamptz default now(),
@@ -278,6 +278,11 @@ create policy "student feedback"
 create policy "coach reads feedback"
   on public.session_feedback for select
   using (public.i_coach(student_id));
+
+create policy "coach writes feedback"
+  on public.session_feedback for all
+  using (public.i_coach(student_id))
+  with check (public.i_coach(student_id));
 
 
 -- ============================================================
