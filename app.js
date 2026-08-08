@@ -54,6 +54,8 @@ let savedVoice = {};
 let workoutFeedback = {};
 // Extra trainings per week (keyed by week number → {exercises:[...]})
 let extraTrainings = {};
+// Whether the extra training tab is currently selected
+let currentViewingExtra = false;
 // MediaRecorder state
 let _recState = {};
 // Progress photos (keyed by "week_view" → data URL)
@@ -254,8 +256,12 @@ function renderSelectors() {
   const dayContainer = document.getElementById('day-btns-container');
   if (dayContainer) {
     let html = '';
+    // Extra training button comes first, only when one exists for this week
+    if (extraTrainings[currentWeek]) {
+      html += `<button class="day-btn extra-btn${currentViewingExtra ? ' active' : ''}" onclick="selectExtra(this)">Entr. supp.</button>`;
+    }
     for (let d = 1; d <= dayCount; d++) {
-      html += `<button class="day-btn ${d === currentDay ? 'active' : ''}" onclick="selectDay(${d},this)">Jour ${d}</button>`;
+      html += `<button class="day-btn ${!currentViewingExtra && d === currentDay ? 'active' : ''}" onclick="selectDay(${d},this)">Jour ${d}</button>`;
     }
     dayContainer.innerHTML = html;
   }
@@ -272,6 +278,7 @@ function renderSelectors() {
 
 function selectWeek(w, btn) {
   currentWeek = w;
+  currentViewingExtra = false;
   document.querySelectorAll('#week-btns-container .week-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   renderSelectors();
@@ -279,7 +286,15 @@ function selectWeek(w, btn) {
 }
 
 function selectDay(d, btn) {
+  currentViewingExtra = false;
   currentDay = d;
+  document.querySelectorAll('#day-btns-container .day-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTraining();
+}
+
+function selectExtra(btn) {
+  currentViewingExtra = true;
   document.querySelectorAll('#day-btns-container .day-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   renderTraining();
@@ -296,7 +311,61 @@ function repeatTraining(sourceDay) {
   extraTrainings[currentWeek] = { exercises: copiedExercises };
   localStorage.setItem(pk('extraTrainings'), JSON.stringify(extraTrainings));
   _saveExtraTrainingToSupabase(currentWeek);
+  currentViewingExtra = true;
+  renderSelectors();
   renderTraining();
+}
+
+function _renderExtraTraining(grid) {
+  const extra = extraTrainings[currentWeek];
+  const exercises = (extra && extra.exercises) || [];
+
+  let rows = '';
+  exercises.forEach((ex, i) => {
+    const w = (ex.weeks && ex.weeks[0]) || {};
+    const series = w.series !== undefined && w.series !== '' ? w.series : '—';
+    const reps   = w.reps   !== undefined && w.reps   !== '' ? w.reps   : '—';
+    const charge = w.charge !== undefined && w.charge !== '' ? w.charge + ' kg' : '—';
+    rows += `
+      <div class="exercise-card" id="ex-card-extra-${i}">
+        <div class="ex-top">
+          <div class="ex-name-wrap">
+            <span class="ex-number">${i + 1}</span>
+            <div>
+              <div class="ex-name">${h(ex.name)}</div>
+              ${ex.tips ? `<div class="ex-tips">${h(ex.tips)}</div>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="ex-metrics">
+          <div class="metric"><span class="metric-label">Séries</span><span class="metric-val">${h(String(series))}</span></div>
+          <div class="metric"><span class="metric-label">Reps</span><span class="metric-val">${h(String(reps))}</span></div>
+          <div class="metric"><span class="metric-label">Charge (kg)</span><span class="metric-val">${h(String(charge))}</span></div>
+          <div class="metric done-metric">
+            <span class="metric-label">Réalisé</span>
+            <span class="metric-val editable" contenteditable="true"
+                  onblur="saveExtraWeekDone(${i},this)">${h(String(w.done ?? ''))}</span>
+          </div>
+        </div>
+      </div>`;
+  });
+
+  grid.innerHTML = `
+    <div class="day-header">
+      <h2 class="editable-title">Entraînement supplémentaire</h2>
+      <span class="week-badge">Semaine ${currentWeek}</span>
+      <button class="extra-training-delete-btn" onclick="deleteExtraTraining()" title="Supprimer cet entraînement supplémentaire">🗑 Supprimer</button>
+    </div>
+    <div class="exercises-list">${rows}</div>`;
+}
+
+function saveExtraWeekDone(exIdx, el) {
+  const extra = extraTrainings[currentWeek];
+  if (!extra || !extra.exercises[exIdx]) return;
+  if (!extra.exercises[exIdx].weeks) extra.exercises[exIdx].weeks = [{}];
+  extra.exercises[exIdx].weeks[0].done = el.textContent.trim();
+  localStorage.setItem(pk('extraTrainings'), JSON.stringify(extraTrainings));
+  _saveExtraTrainingToSupabase(currentWeek);
 }
 
 function deleteExtraTraining() {
@@ -304,6 +373,8 @@ function deleteExtraTraining() {
   delete extraTrainings[currentWeek];
   localStorage.setItem(pk('extraTrainings'), JSON.stringify(extraTrainings));
   _deleteExtraTrainingFromSupabase(currentWeek);
+  currentViewingExtra = false;
+  renderSelectors();
   renderTraining();
 }
 
@@ -476,6 +547,13 @@ function removeWeek() {
 function renderTraining() {
   stopAllTimers();
   const grid = document.getElementById('training-grid');
+
+  // ── Extra training view ──────────────────────────────────────
+  if (currentViewingExtra) {
+    _renderExtraTraining(grid);
+    return;
+  }
+
   const dayData = trainingData.days[currentDay] || { label: `Jour ${currentDay}`, exercises: [] };
   const wIdx = currentWeek - 1;
 
@@ -641,27 +719,6 @@ function renderTraining() {
         ${(fb.pain||[]).length ? `<p class="bilan-summary-pain">🔴 ${fb.pain.length} zone${fb.pain.length > 1 ? 's' : ''} douloureuse${fb.pain.length > 1 ? 's' : ''} marquée${fb.pain.length > 1 ? 's' : ''}</p>` : ''}
       </div>` : ''}
     </div>`;
-
-  // Entraînement supplémentaire — only for currentWeek
-  const extra = extraTrainings[currentWeek];
-  if (extra && extra.exercises && extra.exercises.length) {
-    const exRows = extra.exercises.map((ex, ei) => {
-      const w = ex.weeks && ex.weeks[0] || {};
-      return `<div class="extra-ex-row">
-        <span class="extra-ex-num">${ei + 1}</span>
-        <span class="extra-ex-name">${h(ex.name)}</span>
-        <span class="extra-ex-meta">${w.series ? w.series + ' séries' : ''}${w.reps ? ' · ' + w.reps + ' reps' : ''}${w.charge ? ' · ' + w.charge + ' kg' : ''}</span>
-      </div>`;
-    }).join('');
-    html += `
-    <div class="extra-training-card">
-      <div class="extra-training-header">
-        <span class="extra-training-title">🔁 Entraînement supplémentaire — Semaine ${currentWeek}</span>
-        <button class="extra-training-delete" onclick="deleteExtraTraining()" title="Supprimer">✕</button>
-      </div>
-      <div class="extra-training-exercises">${exRows}</div>
-    </div>`;
-  }
 
   grid.innerHTML = html;
   // Set audio src and wire custom player after render
