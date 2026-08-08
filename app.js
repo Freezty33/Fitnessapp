@@ -287,10 +287,17 @@ function repeatTraining(sourceDay) {
   const newId = dayCount + 1;
   dayCount++;
   const sourceExercises = (trainingData.days[sourceDay] || {}).exercises || [];
-  trainingData.days[newId] = {
-    label: `Jour ${newId}`,
-    exercises: JSON.parse(JSON.stringify(sourceExercises))
-  };
+  // Copy structure (name, tips) and week 1 targets only — other weeks start blank
+  const copiedExercises = JSON.parse(JSON.stringify(sourceExercises)).map(ex => {
+    const firstWeek = (ex.weeks && ex.weeks[0]) || {};
+    ex.weeks = Array.from({ length: weekCount }, (_, wi) =>
+      wi === 0
+        ? { series: firstWeek.series ?? '', reps: firstWeek.reps ?? '', charge: firstWeek.charge ?? '', done: '' }
+        : { series: '', reps: '', charge: '', done: '' }
+    );
+    return ex;
+  });
+  trainingData.days[newId] = { label: `Jour ${newId}`, exercises: copiedExercises };
   persistTraining();
   persistCounts();
   currentDay = newId;
