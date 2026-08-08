@@ -2900,68 +2900,79 @@ function downloadPlanPDF() {
     ? myProfile().full_name || 'Programme'
     : 'Programme';
 
-  // Build one section per day for the current week
-  const wIdx = currentWeek - 1;
+  // Build all weeks, each with all days listed in order
   let daysSections = '';
-  for (let d = 1; d <= dayCount; d++) {
-    const day = trainingData.days[d];
-    if (!day) continue;
-    const exercises = (day.exercises || []);
-    if (!exercises.length) continue;
+  for (let wNum = 1; wNum <= weekCount; wNum++) {
+    const wIdx = wNum - 1;
+    let weekDays = '';
+    for (let d = 1; d <= dayCount; d++) {
+      const day = trainingData.days[d];
+      if (!day) continue;
+      const exercises = (day.exercises || []);
+      if (!exercises.length) continue;
 
-    let rows = '';
-    exercises.forEach((ex, i) => {
-      const w = ex.weeks[wIdx] || {};
-      const series = w.series !== undefined && w.series !== '' ? w.series : '—';
-      const reps   = w.reps   !== undefined && w.reps   !== '' ? w.reps   : '—';
-      const charge = w.charge !== undefined && w.charge !== '' ? w.charge + ' kg' : '—';
-      const done   = w.done   !== undefined && w.done   !== '' ? `<span class="done-tick">✓ ${h(String(w.done))}</span>` : '';
-      rows += `
-        <tr class="${i % 2 === 0 ? 'row-even' : 'row-odd'}">
-          <td class="ex-num">${i + 1}</td>
-          <td class="ex-name-cell">
-            <span class="ex-title">${h(ex.name)}</span>
-            ${ex.tips ? `<span class="ex-tips">${h(ex.tips)}</span>` : ''}
-          </td>
-          <td class="metric-cell">${h(String(series))}</td>
-          <td class="metric-cell">${h(String(reps))}</td>
-          <td class="metric-cell">${h(String(charge))}</td>
-          <td class="metric-cell done-cell">${done}</td>
-        </tr>`;
-    });
+      let rows = '';
+      exercises.forEach((ex, i) => {
+        const w = ex.weeks[wIdx] || {};
+        const series = w.series !== undefined && w.series !== '' ? w.series : '—';
+        const reps   = w.reps   !== undefined && w.reps   !== '' ? w.reps   : '—';
+        const charge = w.charge !== undefined && w.charge !== '' ? w.charge + ' kg' : '—';
+        const done   = w.done   !== undefined && w.done   !== '' ? `<span class="done-tick">✓ ${h(String(w.done))}</span>` : '';
+        rows += `
+          <tr class="${i % 2 === 0 ? 'row-even' : 'row-odd'}">
+            <td class="ex-num">${i + 1}</td>
+            <td class="ex-name-cell">
+              <span class="ex-title">${h(ex.name)}</span>
+              ${ex.tips ? `<span class="ex-tips">${h(ex.tips)}</span>` : ''}
+            </td>
+            <td class="metric-cell">${h(String(series))}</td>
+            <td class="metric-cell">${h(String(reps))}</td>
+            <td class="metric-cell">${h(String(charge))}</td>
+            <td class="metric-cell done-cell">${done}</td>
+          </tr>`;
+      });
 
-    const feedback = workoutFeedback[`${d}_${currentWeek}`];
-    let bilanHtml = '';
-    if (feedback && (feedback.rating > 0 || (feedback.note || '').trim())) {
-      const stars = [1,2,3,4,5].map(n => `<span style="color:${n <= feedback.rating ? '#FFB800' : '#444'}">★</span>`).join('');
-      bilanHtml = `
-        <div class="bilan-row">
-          <span class="bilan-label">Bilan :</span>
-          <span class="bilan-stars">${stars}</span>
-          ${feedback.note ? `<span class="bilan-note">${h(feedback.note)}</span>` : ''}
+      const feedback = workoutFeedback[`${d}_${wNum}`];
+      let bilanHtml = '';
+      if (feedback && (feedback.rating > 0 || (feedback.note || '').trim())) {
+        const stars = [1,2,3,4,5].map(n => `<span style="color:${n <= feedback.rating ? '#FFB800' : '#444'}">★</span>`).join('');
+        bilanHtml = `
+          <div class="bilan-row">
+            <span class="bilan-label">Bilan :</span>
+            <span class="bilan-stars">${stars}</span>
+            ${feedback.note ? `<span class="bilan-note">${h(feedback.note)}</span>` : ''}
+          </div>`;
+      }
+
+      weekDays += `
+        <div class="day-section">
+          <div class="day-header-pdf">
+            <span class="day-title">${h(day.label || `Jour ${d}`)}</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th class="th-num">#</th>
+                <th class="th-name">Exercice</th>
+                <th>Séries</th>
+                <th>Reps</th>
+                <th>Charge</th>
+                <th>Réalisé</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          ${bilanHtml}
         </div>`;
     }
 
+    if (!weekDays) continue;
     daysSections += `
-      <div class="day-section">
-        <div class="day-header-pdf">
-          <span class="day-title">${h(day.label || `Jour ${d}`)}</span>
-          <span class="day-badge">Semaine ${currentWeek}</span>
+      <div class="week-block">
+        <div class="week-separator">
+          <span class="week-sep-label">Semaine ${wNum}</span>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th class="th-num">#</th>
-              <th class="th-name">Exercice</th>
-              <th>Séries</th>
-              <th>Reps</th>
-              <th>Charge</th>
-              <th>Réalisé</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-        ${bilanHtml}
+        ${weekDays}
       </div>`;
   }
 
@@ -2969,7 +2980,7 @@ function downloadPlanPDF() {
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>Programme — ${h(studentName)} — Semaine ${currentWeek}</title>
+<title>Programme — ${h(studentName)}</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -3011,16 +3022,34 @@ function downloadPlanPDF() {
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
-  .day-badge {
-    font-size: 10px;
-    font-weight: 700;
+  /* ── Week block ── */
+  .week-block { margin-bottom: 8px; }
+  .week-separator {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 36px 0 20px;
+    break-before: auto;
+  }
+  .week-separator::before,
+  .week-separator::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #2a2a2a;
+  }
+  .week-sep-label {
+    font-size: 11px;
+    font-weight: 900;
     color: #000;
     background: #C8FF00;
-    border-radius: 4px;
-    padding: 2px 8px;
-    letter-spacing: 0.5px;
+    border-radius: 20px;
+    padding: 3px 14px;
+    letter-spacing: 1px;
     text-transform: uppercase;
+    white-space: nowrap;
   }
+  .week-block:first-child .week-separator { margin-top: 0; }
 
   /* ── Table ── */
   table {
@@ -3103,7 +3132,7 @@ function downloadPlanPDF() {
     <div class="pdf-logo">LOUIS<span>FIT</span></div>
     <div class="pdf-meta">
       <div class="pdf-student">${h(studentName)}</div>
-      <div class="pdf-week">Semaine ${currentWeek} · ${dayCount} jour${dayCount > 1 ? 's' : ''} · ${weekCount} semaine${weekCount > 1 ? 's' : ''}</div>
+      <div class="pdf-week">${dayCount} jour${dayCount > 1 ? 's' : ''} · ${weekCount} semaine${weekCount > 1 ? 's' : ''}</div>
     </div>
   </div>
 
@@ -3111,7 +3140,7 @@ function downloadPlanPDF() {
 
   <div class="pdf-footer">
     <span>LouisFIT — Programme personnalisé</span>
-    <span>Semaine ${currentWeek} / ${weekCount}</span>
+    <span>${weekCount} semaine${weekCount > 1 ? 's' : ''} · ${dayCount} jour${dayCount > 1 ? 's' : ''}</span>
   </div>
 </body>
 </html>`;
