@@ -483,7 +483,6 @@ function renderTraining() {
         <button class="voice-btn${hasVoice ? ' has-audio' : ''}" id="voice-rec-${i}"
                 onclick="toggleVoiceRecord(${i})">${hasVoice ? '● Ré-enregistrer' : '● Enregistrer'}</button>
         ${hasVoice ? `<audio id="voice-audio-${i}" controls class="voice-audio-player"></audio>
-        <canvas class="voice-waveform" id="voice-wave-${i}" width="120" height="28"></canvas>
         <button class="voice-delete-btn" onclick="deleteVoice(${i})" title="Supprimer">✕</button>` : ''}
       </div>`;
     } else if (hasVoice) {
