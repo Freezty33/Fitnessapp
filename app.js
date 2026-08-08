@@ -2988,24 +2988,93 @@ function downloadPlanPDF() {
     font-family: 'Inter', 'Segoe UI', sans-serif;
     background: #0a0a0a;
     color: #e8e8e8;
-    padding: 40px 48px;
+    padding: 0 0 40px;
     font-size: 13px;
     line-height: 1.5;
   }
-  /* ── Header ── */
+  /* ── Hero header ── */
   .pdf-header {
+    position: relative;
+    height: 180px;
+    overflow: hidden;
+    margin-bottom: 40px;
     display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    margin-bottom: 36px;
-    border-bottom: 2px solid #C8FF00;
-    padding-bottom: 16px;
+    align-items: center;
+    justify-content: center;
   }
-  .pdf-logo { font-size: 28px; font-weight: 900; letter-spacing: -1px; color: #fff; }
+  .pdf-header-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background: #0a0a0a;
+  }
+  .pdf-coach-left {
+    position: absolute;
+    left: 0; bottom: 0;
+    height: 100%; width: auto; max-width: 38%;
+    object-fit: contain; object-position: left bottom;
+    opacity: 0.75;
+    filter: grayscale(15%) contrast(1.08);
+    -webkit-mask-image: linear-gradient(to right, black 55%, transparent 100%);
+    mask-image: linear-gradient(to right, black 55%, transparent 100%);
+  }
+  .pdf-coach-right {
+    position: absolute;
+    right: 0; bottom: 0;
+    height: 100%; width: auto; max-width: 38%;
+    object-fit: contain; object-position: right bottom;
+    opacity: 0.75;
+    filter: grayscale(15%) contrast(1.08);
+    -webkit-mask-image: linear-gradient(to left, black 55%, transparent 100%);
+    mask-image: linear-gradient(to left, black 55%, transparent 100%);
+  }
+  .pdf-header-overlay {
+    position: absolute; inset: 0;
+    background:
+      linear-gradient(to right,  rgba(10,10,10,0.4) 0%, rgba(10,10,10,0) 20%, rgba(10,10,10,0) 80%, rgba(10,10,10,0.4) 100%),
+      linear-gradient(to bottom, rgba(10,10,10,0.5) 0%, rgba(10,10,10,0) 30%, rgba(10,10,10,0) 70%, rgba(10,10,10,0.7) 100%);
+  }
+  .pdf-header-content {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    text-align: center;
+  }
+  .pdf-logo {
+    font-size: 38px;
+    font-weight: 900;
+    letter-spacing: -1.5px;
+    color: #fff;
+    line-height: 1;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.7);
+  }
   .pdf-logo span { color: #C8FF00; }
-  .pdf-meta { text-align: right; }
-  .pdf-student { font-size: 18px; font-weight: 700; color: #C8FF00; }
-  .pdf-week { font-size: 12px; color: #777; margin-top: 2px; }
+  .pdf-student {
+    font-size: 13px;
+    font-weight: 700;
+    color: #C8FF00;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    text-shadow: 0 1px 6px rgba(0,0,0,0.8);
+  }
+  .pdf-week {
+    font-size: 10px;
+    color: rgba(255,255,255,0.45);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .pdf-header-bar {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(to right, transparent, #C8FF00 30%, #C8FF00 70%, transparent);
+  }
+  /* ── Content wrapper ── */
+  .pdf-content { padding: 0 48px; }
 
   /* ── Day section ── */
   .day-section { margin-bottom: 32px; break-inside: avoid; }
@@ -3119,6 +3188,8 @@ function downloadPlanPDF() {
     color: #444;
     display: flex;
     justify-content: space-between;
+    padding-left: 0;
+    padding-right: 0;
   }
 
   @media print {
@@ -3129,18 +3200,25 @@ function downloadPlanPDF() {
 </head>
 <body>
   <div class="pdf-header">
-    <div class="pdf-logo">LOUIS<span>FIT</span></div>
-    <div class="pdf-meta">
+    <div class="pdf-header-img"></div>
+    <img class="pdf-coach-left"  src="coach1.png" alt="">
+    <img class="pdf-coach-right" src="coach2.png" alt="">
+    <div class="pdf-header-overlay"></div>
+    <div class="pdf-header-content">
+      <div class="pdf-logo">LOUIS<span>FIT</span></div>
       <div class="pdf-student">${h(studentName)}</div>
       <div class="pdf-week">${dayCount} jour${dayCount > 1 ? 's' : ''} · ${weekCount} semaine${weekCount > 1 ? 's' : ''}</div>
     </div>
+    <div class="pdf-header-bar"></div>
   </div>
 
-  ${daysSections || '<p style="color:#555;text-align:center;padding:40px 0">Aucun exercice dans ce programme.</p>'}
+  <div class="pdf-content">
+    ${daysSections || '<p style="color:#555;text-align:center;padding:40px 0">Aucun exercice dans ce programme.</p>'}
 
-  <div class="pdf-footer">
-    <span>LouisFIT — Programme personnalisé</span>
-    <span>${weekCount} semaine${weekCount > 1 ? 's' : ''} · ${dayCount} jour${dayCount > 1 ? 's' : ''}</span>
+    <div class="pdf-footer">
+      <span>LouisFIT — Programme personnalisé</span>
+      <span>${weekCount} semaine${weekCount > 1 ? 's' : ''} · ${dayCount} jour${dayCount > 1 ? 's' : ''}</span>
+    </div>
   </div>
 </body>
 </html>`;
