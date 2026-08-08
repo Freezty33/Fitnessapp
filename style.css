@@ -1264,6 +1264,7 @@ body {
   .hero-selectors .day-btn,
   .hero-selectors .week-btn { padding: 9px 14px; font-size: 13px; }
   .hero-selectors .btn-add-exercise { width: 100%; justify-content: center; }
+  .hero-selectors .btn-download-pdf { width: 100%; justify-content: center; text-align: center; }
   .btn-selector-add, .btn-selector-remove {
     width: 26px; height: 26px; font-size: 16px;
     /* Opaque on mobile: solid border color, black fill */
