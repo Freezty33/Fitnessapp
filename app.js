@@ -476,20 +476,31 @@ function renderTraining() {
     const hasVoice = !!savedVoice[voiceKey];
     const _coachMode = typeof isCoach === 'function' && isCoach();
     let voiceHtml = '';
+    const playerHtml = `
+        <audio id="voice-audio-${i}" preload="metadata"></audio>
+        <div class="voice-player" id="voice-player-${i}">
+          <button class="voice-play-btn" id="voice-play-${i}" onclick="toggleVoicePlay(${i})" title="Lecture">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <div class="voice-progress-wrap" id="voice-prog-wrap-${i}" onclick="seekVoice(event,${i})">
+            <div class="voice-progress-bar" id="voice-prog-${i}"></div>
+          </div>
+          <span class="voice-time" id="voice-time-${i}">0:00</span>
+        </div>`;
     if (_coachMode) {
       voiceHtml = `
       <div class="ex-voice" id="voice-${i}">
         <span class="ex-voice-label">🎙 Coach</span>
         <button class="voice-btn${hasVoice ? ' has-audio' : ''}" id="voice-rec-${i}"
                 onclick="toggleVoiceRecord(${i})">${hasVoice ? '● Ré-enregistrer' : '● Enregistrer'}</button>
-        ${hasVoice ? `<audio id="voice-audio-${i}" controls class="voice-audio-player"></audio>
+        ${hasVoice ? `${playerHtml}
         <button class="voice-delete-btn" onclick="deleteVoice(${i})" title="Supprimer">✕</button>` : ''}
       </div>`;
     } else if (hasVoice) {
       voiceHtml = `
       <div class="ex-voice ex-voice-student" id="voice-${i}">
         <span class="ex-voice-label">🎙 Coach</span>
-        <audio id="voice-audio-${i}" controls class="voice-audio-player"></audio>
+        ${playerHtml}
       </div>`;
     }
 
@@ -593,26 +604,24 @@ function renderTraining() {
     </div>`;
 
   grid.innerHTML = html;
-  // Set audio src and draw waveforms after render (DOM property — not attribute — to bypass security hook)
+  // Set audio src and wire custom player after render
   dayData.exercises.forEach((ex, i) => {
     const vKey = currentDay + '_' + ex.name;
     if (!savedVoice[vKey]) return;
-    drawWaveform(i, vKey);
     const audioEl = document.getElementById('voice-audio-' + i);
-    if (audioEl) {
-      const dataUrl = savedVoice[vKey];
-      try {
-        const [header, b64] = dataUrl.split(',');
-        const mime = header.match(/:(.*?);/)[1];
-        const bytes = atob(b64);
-        const buf = new Uint8Array(bytes.length);
-        for (let k = 0; k < bytes.length; k++) buf[k] = bytes.charCodeAt(k);
-        const blob = new Blob([buf], { type: mime });
-        audioEl.src = URL.createObjectURL(blob);
-      } catch (_) {
-        audioEl.src = dataUrl;
-      }
+    if (!audioEl) return;
+    const dataUrl = savedVoice[vKey];
+    try {
+      const [header, b64] = dataUrl.split(',');
+      const mime = header.match(/:(.*?);/)[1];
+      const bytes = atob(b64);
+      const buf = new Uint8Array(bytes.length);
+      for (let k = 0; k < bytes.length; k++) buf[k] = bytes.charCodeAt(k);
+      audioEl.src = URL.createObjectURL(new Blob([buf], { type: mime }));
+    } catch (_) {
+      audioEl.src = dataUrl;
     }
+    _wireVoicePlayer(audioEl, i);
   });
   updateKPIs();
 }
@@ -1188,6 +1197,54 @@ function drawWaveform(idx, exName) {
     ctx.moveTo(x, mid - amp); ctx.lineTo(x, mid + amp);
   }
   ctx.stroke();
+}
+
+// ── Custom voice player helpers ───────────────────────────────
+function _fmtTime(s) {
+  const m = Math.floor(s / 60);
+  return m + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+}
+
+function _wireVoicePlayer(audioEl, i) {
+  const playBtn  = document.getElementById('voice-play-' + i);
+  const progBar  = document.getElementById('voice-prog-' + i);
+  const timeEl   = document.getElementById('voice-time-' + i);
+  if (!playBtn || !progBar || !timeEl) return;
+
+  const playIcon = `<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M8 5v14l11-7z"/></svg>`;
+  const pauseIcon = `<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
+
+  audioEl.addEventListener('timeupdate', () => {
+    const pct = audioEl.duration ? (audioEl.currentTime / audioEl.duration) * 100 : 0;
+    progBar.style.width = pct + '%';
+    timeEl.textContent = _fmtTime(audioEl.currentTime);
+  });
+  audioEl.addEventListener('ended', () => {
+    playBtn.innerHTML = playIcon;
+    progBar.style.width = '0%';
+    timeEl.textContent = _fmtTime(audioEl.duration || 0);
+  });
+  audioEl.addEventListener('loadedmetadata', () => {
+    timeEl.textContent = _fmtTime(audioEl.duration);
+  });
+
+  playBtn.addEventListener('click', () => {
+    if (audioEl.paused) { audioEl.play(); playBtn.innerHTML = pauseIcon; }
+    else { audioEl.pause(); playBtn.innerHTML = playIcon; }
+  });
+}
+
+function seekVoice(e, i) {
+  const audioEl = document.getElementById('voice-audio-' + i);
+  const wrap    = document.getElementById('voice-prog-wrap-' + i);
+  if (!audioEl || !wrap || !audioEl.duration) return;
+  const rect = wrap.getBoundingClientRect();
+  audioEl.currentTime = ((e.clientX - rect.left) / rect.width) * audioEl.duration;
+}
+
+function toggleVoicePlay(i) {
+  // handled by _wireVoicePlayer listener — this stub prevents "not defined" errors
+  // if the button fires before wire-up completes (shouldn't happen but safety net)
 }
 
 // ============================================================
