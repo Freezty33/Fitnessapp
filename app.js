@@ -238,6 +238,18 @@ function _updateTrainingTabDot() {
   dot.classList.toggle('visible', hasIncomplete && dayData.exercises.length > 0);
 }
 
+function _updateTrainingTabDot() {
+  const dot = document.getElementById('btab-dot-training');
+  if (!dot) return;
+  const dayData = trainingData.days[currentDay] || { exercises: [] };
+  const wIdx = currentWeek - 1;
+  const hasIncomplete = dayData.exercises.some(ex => {
+    const w = ex.weeks && ex.weeks[wIdx];
+    return !w || !String(w.done || '').trim();
+  });
+  dot.classList.toggle('visible', hasIncomplete && dayData.exercises.length > 0);
+}
+
 function toggleMobileNav() {
   const drawer = document.getElementById('nav-drawer');
   const btn    = document.getElementById('nav-hamburger');
