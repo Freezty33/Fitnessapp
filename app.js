@@ -976,9 +976,9 @@ function renderTraining() {
     return;
   }
 
-  // ── Student mobile: show session overview with start CTA ─────
-  const _isStudentMobile = typeof isCoach === 'function' && !isCoach() && window.innerWidth <= 480;
-  if (_isStudentMobile) {
+  // ── Student view: show session overview with start CTA ───────
+  const _isStudent = typeof isCoach === 'function' && !isCoach();
+  if (_isStudent) {
     const dayData = trainingData.days[currentDay] || { label: `Jour ${currentDay}`, exercises: [] };
     _renderStudentDayOverview(grid, dayData, currentWeek - 1);
     updateKPIs();
