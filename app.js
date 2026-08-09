@@ -558,6 +558,412 @@ function removeWeek() {
 }
 
 // ============================================================
+// STUDENT MOBILE — WORKOUT MODE
+// ============================================================
+let _wm = null; // { exercises, wIdx, current, overlay }
+
+function _renderStudentDayOverview(grid, dayData, wIdx) {
+  const exercises = dayData.exercises || [];
+  const totalExs = exercises.length;
+  const completedCount = exercises.filter(ex => {
+    const w = ex.weeks && ex.weeks[wIdx];
+    return w && String(w.done || '').trim() && String(w.done || '').trim() !== '—';
+  }).length;
+  const allDone = totalExs > 0 && completedCount === totalExs;
+
+  const hasVoice = exercises.some(ex => savedVoice[currentDay + '_' + ex.name]);
+
+  let rowsHtml = '';
+  exercises.forEach((ex, i) => {
+    const w = ex.weeks && ex.weeks[wIdx] || {};
+    const series = w.series !== undefined && w.series !== '' ? w.series : null;
+    const reps   = w.reps   !== undefined && w.reps   !== '' ? w.reps   : null;
+    const charge = w.charge !== undefined && w.charge !== '' ? w.charge : null;
+    const done   = String(w.done || '').trim();
+    const isDone = done && done !== '—';
+    let targetParts = [];
+    if (series) targetParts.push(series + ' séries');
+    if (reps)   targetParts.push(reps + ' reps');
+    if (charge) targetParts.push('@ ' + charge + ' kg');
+    const targetLine = targetParts.join(' · ');
+    const vKey = currentDay + '_' + ex.name;
+    const hasV = !!savedVoice[vKey];
+    rowsHtml += `
+      <div class="sdo-ex-row ${isDone ? 'sdo-ex-done' : ''}" onclick="startWorkoutMode(${i})">
+        <div class="sdo-ex-num">${isDone ? '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="4,10 8,14 16,6"/></svg>' : (i + 1)}</div>
+        <div class="sdo-ex-info">
+          <span class="sdo-ex-name">${h(ex.name)}</span>
+          ${targetLine ? `<span class="sdo-ex-target">${h(targetLine)}</span>` : ''}
+        </div>
+        <div class="sdo-ex-right">
+          ${hasV ? '<span class="sdo-voice-chip">🎙</span>' : ''}
+          <svg class="sdo-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9,18 15,12 9,6"/></svg>
+        </div>
+      </div>`;
+  });
+
+  const progressPct = totalExs > 0 ? Math.round(completedCount / totalExs * 100) : 0;
+  const fbKey = currentDay + '_' + currentWeek;
+  const fb = workoutFeedback[fbKey] || {};
+  const hasFeedback = fb.rating > 0 || (fb.note || '').trim() || (fb.pain || []).length;
+
+  grid.innerHTML = `
+    <div class="sdo-container">
+      <div class="sdo-hero">
+        <div class="sdo-hero-content">
+          <span class="sdo-week-badge">Semaine ${currentWeek}</span>
+          <h2 class="sdo-day-title">${h(dayData.label)}</h2>
+          <div class="sdo-meta">
+            <span>${totalExs} exercice${totalExs > 1 ? 's' : ''}</span>
+            ${completedCount > 0 ? `<span class="sdo-meta-dot">·</span><span>${completedCount}/${totalExs} terminés</span>` : ''}
+          </div>
+        </div>
+        ${totalExs > 0 ? `<div class="sdo-progress-ring-wrap">
+          <svg class="sdo-progress-ring" viewBox="0 0 40 40" width="40" height="40">
+            <circle cx="20" cy="20" r="16" fill="none" stroke="var(--border)" stroke-width="3"/>
+            <circle cx="20" cy="20" r="16" fill="none" stroke="var(--accent)" stroke-width="3"
+              stroke-dasharray="${Math.round(16 * 2 * Math.PI * progressPct / 100)} ${Math.round(16 * 2 * Math.PI * (100 - progressPct) / 100)}"
+              stroke-linecap="round" stroke-dashoffset="${Math.round(16 * 2 * Math.PI * 0.25)}"
+              transform="rotate(-90 20 20)"/>
+            <text x="20" y="24" text-anchor="middle" font-size="10" fill="var(--text)" font-weight="700">${progressPct}%</text>
+          </svg>
+        </div>` : ''}
+      </div>
+
+      ${totalExs > 0 ? `
+      <div class="sdo-exercises">${rowsHtml}</div>
+
+      <div class="sdo-cta-wrap">
+        ${allDone
+          ? `<button class="sdo-cta sdo-cta-done" onclick="openBilanOverlay('${fbKey}')">
+               ${hasFeedback ? '✏️ Modifier le bilan' : '✅ Séance terminée — Bilan'}
+             </button>`
+          : `<button class="sdo-cta" onclick="startWorkoutMode(0)">
+               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+               ${completedCount > 0 ? 'Continuer la séance' : 'Commencer la séance'}
+             </button>`
+        }
+        ${hasFeedback && !allDone ? `<button class="sdo-cta-secondary" onclick="openBilanOverlay('${fbKey}')">Voir le bilan</button>` : ''}
+      </div>
+      ` : `
+      <div class="sdo-empty">
+        <p>Aucun exercice pour cette journée</p>
+      </div>
+      `}
+
+      ${hasFeedback ? `
+      <div class="bilan-summary sdo-bilan-summary" id="bilan-summary">
+        <div class="bilan-summary-header">
+          <span class="bilan-summary-title">Bilan de la séance</span>
+          <div class="sum-stars">${[1,2,3,4,5].map(n => `<span class="sum-star${n <= fb.rating ? ' lit' : ''}">★</span>`).join('')}</div>
+        </div>
+        ${fb.note ? `<p class="bilan-summary-note">${h(fb.note)}</p>` : ''}
+        ${(fb.pain||[]).length ? `<p class="bilan-summary-pain">🔴 ${fb.pain.length} zone${fb.pain.length > 1 ? 's' : ''} douloureuse${fb.pain.length > 1 ? 's' : ''}</p>` : ''}
+      </div>` : ''}
+    </div>`;
+}
+
+function startWorkoutMode(startIdx) {
+  const dayData = trainingData.days[currentDay] || { exercises: [] };
+  const exercises = dayData.exercises || [];
+  if (!exercises.length) return;
+  const wIdx = currentWeek - 1;
+
+  _wm = { exercises, wIdx, current: startIdx };
+
+  const overlay = document.createElement('div');
+  overlay.id = 'workout-overlay';
+  overlay.className = 'workout-overlay';
+  document.body.appendChild(overlay);
+  _wm.overlay = overlay;
+
+  // Swipe detection
+  let touchStartX = 0;
+  overlay.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, { passive: true });
+  overlay.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 60) {
+      if (dx < 0) _wmNext();
+      else _wmPrev();
+    }
+  });
+
+  _wmRender();
+}
+
+function _wmClose() {
+  if (_wm && _wm.overlay) _wm.overlay.remove();
+  _wm = null;
+  stopAllTimers();
+  renderTraining();
+}
+
+function _wmNext() {
+  if (!_wm) return;
+  if (_wm.current < _wm.exercises.length - 1) {
+    _wm.current++;
+    _wmRender('next');
+  }
+}
+
+function _wmPrev() {
+  if (!_wm) return;
+  if (_wm.current > 0) {
+    _wm.current--;
+    _wmRender('prev');
+  }
+}
+
+function _wmRender(dir) {
+  if (!_wm || !_wm.overlay) return;
+  const { exercises, wIdx, current, overlay } = _wm;
+  const ex = exercises[current];
+  const w  = (ex.weeks && ex.weeks[wIdx]) || {};
+  const total = exercises.length;
+
+  const series = w.series !== undefined && w.series !== '' ? w.series : '—';
+  const reps   = w.reps   !== undefined && w.reps   !== '' ? w.reps   : '—';
+  const charge = w.charge !== undefined && w.charge !== '' ? w.charge + ' kg' : '—';
+  const done   = String(w.done || '');
+
+  let prevHint = '';
+  if (wIdx > 0) {
+    const prevW = ex.weeks && ex.weeks[wIdx - 1];
+    const prevDone = prevW && String(prevW.done || '').trim();
+    if (prevDone && prevDone !== '—') {
+      prevHint = `<span class="wm-prev-hint">S${wIdx}: ${h(prevDone)}</span>`;
+    }
+  }
+
+  const vKey = currentDay + '_' + ex.name;
+  const hasVoice = !!savedVoice[vKey];
+  let voiceHtml = '';
+  if (hasVoice) {
+    voiceHtml = `
+      <div class="wm-voice">
+        <audio id="wm-voice-audio" preload="metadata"></audio>
+        <div class="voice-player" id="wm-voice-player">
+          <button class="voice-play-btn" id="wm-voice-play" onclick="toggleWmVoicePlay()" title="Note du coach">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <div class="voice-progress-wrap" id="wm-voice-prog-wrap" onclick="seekWmVoice(event)">
+            <div class="voice-progress-bar" id="wm-voice-prog"></div>
+          </div>
+          <span class="voice-time" id="wm-voice-time">0:00</span>
+          <span class="wm-voice-label">Note coach</span>
+        </div>
+      </div>`;
+  }
+
+  // Progress bar arc
+  const progressPct = Math.round((current + 1) / total * 100);
+
+  // Timer
+  const timerKey = ex.name;
+  const defaultSecs = timerDefaults[timerKey] || 90;
+
+  overlay.innerHTML = `
+    <div class="wm-header">
+      <button class="wm-close" onclick="_wmClose()">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <div class="wm-progress-wrap">
+        <div class="wm-progress-bar" style="width:${progressPct}%"></div>
+      </div>
+      <span class="wm-count">${current + 1} / ${total}</span>
+    </div>
+
+    <div class="wm-body">
+      <div class="wm-ex-name">${h(ex.name)}</div>
+      ${ex.tips ? `<div class="wm-ex-tips">${h(ex.tips)}</div>` : ''}
+      ${voiceHtml}
+
+      <div class="wm-target-card">
+        <span class="wm-card-label">Objectif</span>
+        <span class="wm-target-val">${h(String(series))} × ${h(String(reps))}  <span class="wm-target-charge">${h(charge)}</span></span>
+      </div>
+
+      <div class="wm-done-card">
+        <span class="wm-card-label">J'ai fait</span>
+        <span class="wm-done-val editable" contenteditable="true" id="wm-done-input"
+              onblur="saveWmDone()">${h(done)}</span>
+        ${prevHint}
+      </div>
+
+      <div class="wm-timer-row">
+        <span class="wm-timer-label">Repos</span>
+        <input class="wm-timer-input" type="number" min="5" max="600"
+               value="${defaultSecs}" id="wm-timer-secs"
+               onchange="wmSetTimerDefault(this.value)">s
+        <button class="wm-timer-btn" id="wm-timer-btn" onclick="toggleWmTimer()">▶</button>
+        <span class="wm-timer-val" id="wm-timer-val">${defaultSecs}</span><span class="wm-timer-unit">s</span>
+        <button class="wm-timer-reset" onclick="resetWmTimer()">↺</button>
+      </div>
+    </div>
+
+    <div class="wm-nav">
+      <button class="wm-btn-prev ${current === 0 ? 'wm-btn-disabled' : ''}" onclick="_wmPrev()" ${current === 0 ? 'disabled' : ''}>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15,18 9,12 15,6"/></svg>
+        Précédent
+      </button>
+      ${current === total - 1
+        ? `<button class="wm-btn-finish" onclick="_wmFinish()">Terminer la séance</button>`
+        : `<button class="wm-btn-next" onclick="_wmNext()">
+             Suivant
+             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9,18 15,12 9,6"/></svg>
+           </button>`
+      }
+    </div>`;
+
+  // Wire voice player after render
+  if (hasVoice) {
+    const audioEl = document.getElementById('wm-voice-audio');
+    if (audioEl) {
+      const dataUrl = savedVoice[vKey];
+      try {
+        const [header, b64] = dataUrl.split(',');
+        const mime = header.match(/:(.*?);/)[1];
+        const bytes = atob(b64);
+        const buf = new Uint8Array(bytes.length);
+        for (let k = 0; k < bytes.length; k++) buf[k] = bytes.charCodeAt(k);
+        audioEl.src = URL.createObjectURL(new Blob([buf], { type: mime }));
+      } catch (_) { audioEl.src = dataUrl; }
+      _wireWmVoicePlayer(audioEl);
+    }
+  }
+
+  // Focus done input
+  const doneInput = document.getElementById('wm-done-input');
+  if (doneInput) {
+    setTimeout(() => {
+      doneInput.focus();
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(doneInput);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }, 80);
+  }
+
+  // Slide animation
+  if (dir) {
+    overlay.classList.remove('wm-slide-left', 'wm-slide-right');
+    void overlay.offsetWidth;
+    overlay.classList.add(dir === 'next' ? 'wm-slide-left' : 'wm-slide-right');
+    setTimeout(() => overlay.classList.remove('wm-slide-left', 'wm-slide-right'), 280);
+  }
+}
+
+function saveWmDone() {
+  if (!_wm) return;
+  const { exercises, wIdx, current } = _wm;
+  const el = document.getElementById('wm-done-input');
+  if (!el) return;
+  const val = el.textContent.trim();
+  const ex = exercises[current];
+  if (!ex.weeks) ex.weeks = [];
+  while (ex.weeks.length <= wIdx) ex.weeks.push({ series:'', reps:'', charge:'', done:'' });
+  ex.weeks[wIdx].done = val;
+  trainingData.days[currentDay].exercises[current] = ex;
+  persistTraining();
+  updateKPIs();
+  _updateTrainingTabDot();
+}
+
+function _wmFinish() {
+  saveWmDone();
+  _wmClose();
+  const fbKey = currentDay + '_' + currentWeek;
+  openBilanOverlay(fbKey);
+}
+
+// Workout mode timer (separate from main timer state)
+let _wmTimerState = null;
+
+function wmSetTimerDefault(val) {
+  const secs = Math.max(5, Math.min(600, parseInt(val) || 90));
+  if (!_wm) return;
+  const ex = _wm.exercises[_wm.current];
+  timerDefaults[ex.name] = secs;
+  localStorage.setItem(pk('timers'), JSON.stringify(timerDefaults));
+  if (!_wmTimerState || !_wmTimerState.running) {
+    const el = document.getElementById('wm-timer-val');
+    if (el) el.textContent = secs;
+    if (_wmTimerState) _wmTimerState.remaining = secs;
+  }
+}
+
+function toggleWmTimer() {
+  const secs = parseInt(document.getElementById('wm-timer-secs').value) || 90;
+  if (!_wmTimerState) {
+    _wmTimerState = { remaining: secs, running: false, interval: null };
+  }
+  if (_wmTimerState.running) {
+    clearInterval(_wmTimerState.interval);
+    _wmTimerState.running = false;
+    const btn = document.getElementById('wm-timer-btn');
+    if (btn) { btn.textContent = '▶'; btn.classList.remove('running'); }
+  } else {
+    _wmTimerState.running = true;
+    const btn = document.getElementById('wm-timer-btn');
+    if (btn) { btn.textContent = '⏸'; btn.classList.add('running'); }
+    _wmTimerState.interval = setInterval(() => {
+      _wmTimerState.remaining--;
+      const el = document.getElementById('wm-timer-val');
+      if (el) el.textContent = Math.max(0, _wmTimerState.remaining);
+      if (_wmTimerState.remaining <= 0) {
+        clearInterval(_wmTimerState.interval);
+        _wmTimerState.running = false;
+        const b = document.getElementById('wm-timer-btn');
+        if (b) { b.textContent = '▶'; b.classList.remove('running'); }
+        if (el) { el.textContent = '🎉'; }
+        playBeep();
+      }
+    }, 1000);
+  }
+}
+
+function resetWmTimer() {
+  if (_wmTimerState) { clearInterval(_wmTimerState.interval); _wmTimerState = null; }
+  const secs = parseInt(document.getElementById('wm-timer-secs').value) || 90;
+  const el = document.getElementById('wm-timer-val');
+  if (el) el.textContent = secs;
+  const btn = document.getElementById('wm-timer-btn');
+  if (btn) { btn.textContent = '▶'; btn.classList.remove('running'); }
+}
+
+// Workout mode voice player
+function _wireWmVoicePlayer(audioEl) {
+  const playBtn  = document.getElementById('wm-voice-play');
+  const progBar  = document.getElementById('wm-voice-prog');
+  const timeEl   = document.getElementById('wm-voice-time');
+  if (!playBtn || !progBar || !timeEl) return;
+  const playIcon  = `<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M8 5v14l11-7z"/></svg>`;
+  const pauseIcon = `<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
+  audioEl.addEventListener('timeupdate', () => {
+    const pct = audioEl.duration ? (audioEl.currentTime / audioEl.duration) * 100 : 0;
+    progBar.style.width = pct + '%';
+    timeEl.textContent = _fmtTime(audioEl.currentTime);
+  });
+  audioEl.addEventListener('ended', () => { playBtn.innerHTML = playIcon; progBar.style.width = '0%'; });
+  audioEl.addEventListener('loadedmetadata', () => { timeEl.textContent = _fmtTime(audioEl.duration); });
+  playBtn.addEventListener('click', () => {
+    if (audioEl.paused) { audioEl.play(); playBtn.innerHTML = pauseIcon; }
+    else { audioEl.pause(); playBtn.innerHTML = playIcon; }
+  });
+}
+
+function toggleWmVoicePlay() { /* handled by _wireWmVoicePlayer */ }
+
+function seekWmVoice(e) {
+  const audioEl = document.getElementById('wm-voice-audio');
+  const wrap    = document.getElementById('wm-voice-prog-wrap');
+  if (!audioEl || !wrap || !audioEl.duration) return;
+  const rect = wrap.getBoundingClientRect();
+  audioEl.currentTime = ((e.clientX - rect.left) / rect.width) * audioEl.duration;
+}
+
+// ============================================================
 // TRAINING — RENDER (inline editable)
 // ============================================================
 function renderTraining() {
@@ -567,6 +973,16 @@ function renderTraining() {
   // ── Extra training view ──────────────────────────────────────
   if (currentViewingExtra) {
     _renderExtraTraining(grid);
+    return;
+  }
+
+  // ── Student mobile: show session overview with start CTA ─────
+  const _isStudentMobile = typeof isCoach === 'function' && !isCoach() && window.innerWidth <= 480;
+  if (_isStudentMobile) {
+    const dayData = trainingData.days[currentDay] || { label: `Jour ${currentDay}`, exercises: [] };
+    _renderStudentDayOverview(grid, dayData, currentWeek - 1);
+    updateKPIs();
+    _updateTrainingTabDot();
     return;
   }
 
