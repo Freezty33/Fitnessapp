@@ -515,6 +515,37 @@
   </div>
 </div>
 
+<!-- BOTTOM TAB BAR — student mobile only, hidden on desktop via CSS -->
+<nav class="bottom-tab-bar" id="bottom-tab-bar" aria-label="Navigation principale">
+  <button class="btab active" id="btab-training" onclick="showTab('training')" aria-label="Entraînement">
+    <svg class="btab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 5v14M18 5v14M3 8h3M18 8h3M3 16h3M18 16h3M9 12h6"/>
+    </svg>
+    <span class="btab-label">Entraîn.</span>
+    <span class="btab-dot" id="btab-dot-training"></span>
+  </button>
+  <button class="btab" id="btab-graphs" onclick="showTab('graphs')" aria-label="Statistiques">
+    <svg class="btab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </svg>
+    <span class="btab-label">Stats</span>
+  </button>
+  <button class="btab" id="btab-nutrition" onclick="showTab('nutrition')" aria-label="Nutrition">
+    <svg class="btab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 8h1a4 4 0 0 1 0 8h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8zM6 1v3M10 1v3M14 1v3"/>
+    </svg>
+    <span class="btab-label">Nutrition</span>
+  </button>
+  <button class="btab" id="btab-photos" onclick="showTab('photos')" aria-label="Corps">
+    <svg class="btab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 7h-3a2 2 0 0 1-2-2V2"/>
+      <path d="M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2H9z"/>
+      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+    <span class="btab-label">Corps</span>
+  </button>
+</nav>
+
 <script src="data.js"></script>
 <script src="auth.js"></script>
 <script src="offline-sync.js"></script>

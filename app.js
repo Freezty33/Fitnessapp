@@ -212,9 +212,25 @@ function showTab(tab) {
   }
   const lbl = document.getElementById('nav-mobile-label');
   if (lbl) lbl.textContent = TAB_LABELS[tab] || tab;
+  // Sync bottom tab bar
+  document.querySelectorAll('.btab').forEach(b => b.classList.remove('active'));
+  const btab = document.getElementById('btab-' + tab);
+  if (btab) btab.classList.add('active');
   if (tab === 'graphs') initCharts();
   if (tab === 'nutrition') renderMeals();
   if (tab === 'photos') renderPhotosTab();
+}
+
+function _updateTrainingTabDot() {
+  const dot = document.getElementById('btab-dot-training');
+  if (!dot) return;
+  const dayData = trainingData.days[currentDay] || { exercises: [] };
+  const wIdx = currentWeek - 1;
+  const hasIncomplete = dayData.exercises.some(ex => {
+    const w = ex.weeks && ex.weeks[wIdx];
+    return !w || !String(w.done || '').trim();
+  });
+  dot.classList.toggle('visible', hasIncomplete && dayData.exercises.length > 0);
 }
 
 function toggleMobileNav() {
@@ -741,6 +757,7 @@ function renderTraining() {
     _wireVoicePlayer(audioEl, i);
   });
   updateKPIs();
+  _updateTrainingTabDot();
 }
 
 // ============================================================
@@ -1388,6 +1405,7 @@ function saveWeekField(dayId, exIdx, wIdx, field, el) {
   weeks[wIdx][field] = val;
   persistTraining();
   updateKPIs();
+  if (field === 'done') _updateTrainingTabDot();
 
   // Sync to Supabase if authenticated
   if (typeof activeStudentId === 'function' && activeStudentId()) {

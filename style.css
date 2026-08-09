@@ -4,17 +4,17 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:        #080808;
-  --surface:   #101010;
-  --card:      #141414;
-  --border:    #1e1e1e;
+  --bg:        #0D0B09;
+  --surface:   #141210;
+  --card:      #1C1A17;
+  --border:    #252218;
   --accent:    #C8FF00;
-  --accent2:   #7EC200;
-  --text:      #e8e8e8;
-  --muted:     #777;
+  --accent2:   #96C200;
+  --text:      #EAE6DF;
+  --muted:     #8A7F6E;
   --danger:    #FF4444;
-  --radius:    14px;
-  --radius-sm: 8px;
+  --radius:    18px;
+  --radius-sm: 10px;
 }
 
 html { scroll-behavior: smooth; }
@@ -2059,4 +2059,114 @@ body {
   .meas-table-wrap { overflow-x: auto; max-width: 100%; }
   .photos-section-header { flex-direction: column; align-items: flex-start; }
   .photo-upload-btns { width: 100%; justify-content: flex-start; }
+}
+
+/* ============================================================
+   BOTTOM TAB BAR — student mobile only (≤ 480px)
+   ============================================================ */
+.bottom-tab-bar {
+  display: none; /* hidden on desktop */
+}
+
+@media (max-width: 480px) {
+  /* Show bottom tab bar */
+  .bottom-tab-bar {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 300;
+    background: rgba(13, 11, 9, 0.97);
+    border-top: 1px solid var(--border);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    padding-bottom: env(safe-area-inset-bottom);
+    height: calc(56px + env(safe-area-inset-bottom));
+  }
+
+  .btab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 8px 0 6px;
+    position: relative;
+    color: var(--muted);
+    transition: color 0.18s;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .btab.active {
+    color: var(--accent);
+  }
+
+  .btab-icon {
+    width: 22px;
+    height: 22px;
+    transition: transform 0.18s;
+  }
+
+  .btab.active .btab-icon {
+    transform: translateY(-1px);
+  }
+
+  /* Active indicator: small lime line above the icon */
+  .btab::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%) scaleX(0);
+    width: 28px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 0 0 2px 2px;
+    transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .btab.active::before {
+    transform: translateX(-50%) scaleX(1);
+  }
+
+  .btab-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    line-height: 1;
+  }
+
+  /* Dot badge for training tab */
+  .btab-dot {
+    position: absolute;
+    top: 6px;
+    right: calc(50% - 16px);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: none;
+  }
+
+  .btab-dot.visible {
+    display: block;
+  }
+
+  /* Add bottom padding to body so content clears the tab bar */
+  body {
+    padding-bottom: calc(56px + env(safe-area-inset-bottom));
+  }
+
+  /* Hide the old hamburger mobile nav on student view
+     (coach on mobile still needs it, but coach uses desktop) */
+  .nav-mobile { display: none !important; }
+  .nav-drawer { display: none !important; }
+
+  /* Hide the mobile sign-out button in the drawer (now unused)
+     Sign-out accessible via profile menu */
 }
