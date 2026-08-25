@@ -140,6 +140,7 @@ const TAB_LABELS = {
   graphs:   'Graphiques',
   nutrition:'Plan Alimentaire',
   photos:   'Photos & Mesures',
+  rdv:     'Rendez-Vous Coaching',
 };
 
 function showTab(tab) {
@@ -157,6 +158,7 @@ function showTab(tab) {
   if (tab === 'graphs') initCharts();
   if (tab === 'nutrition') renderMeals();
   if (tab === 'photos') renderPhotosTab();
+  if (tab === 'rdv') renderRdvTab();
 }
 
 function toggleMobileNav() {
@@ -2358,6 +2360,21 @@ function deleteProfile(e, id) {
 // ============================================================
 // MOBILE PREVIEW TOGGLE (Feature 7) — iframe overlay for true @media behaviour
 // ============================================================
+function _mobilePreviewUrl() {
+  // Find which tab is currently active
+  const activeTab = ['training','graphs','nutrition','photos']
+    .find(t => document.getElementById('tab-' + t)?.classList.contains('active')) || 'training';
+  const params = new URLSearchParams({
+    tab:     activeTab,
+    day:     currentDay,
+    week:    currentWeek,
+    nutday:  currentNutDay,
+    profile: currentProfileId
+  });
+  const base = window.location.href.split('#')[0].split('?')[0];
+  return base + '?' + params.toString() + '#mobile-preview';
+}
+
 function toggleMobilePreview() {
   const existing = document.getElementById('mobile-preview-overlay');
   const btns = document.querySelectorAll('.btn-mobile-preview');
@@ -2382,7 +2399,7 @@ function toggleMobilePreview() {
   });
 
   const frame = document.createElement('iframe');
-  frame.src = window.location.href;
+  frame.src = _mobilePreviewUrl();
   frame.style.cssText = [
     'width:390px', 'height:844px',
     'border:none', 'border-radius:40px',
@@ -2408,10 +2425,32 @@ function toggleMobilePreview() {
 // ============================================================
 // INIT
 // ============================================================
+
+// Apply URL params injected by the 📱 Mobile preview (coach → student state sync)
+(function applyPreviewParams() {
+  const p = new URLSearchParams(window.location.search);
+  if (!p.has('tab') && !p.has('day') && !p.has('week') && !p.has('nutday') && !p.has('profile')) return;
+  const profileParam = p.get('profile');
+  if (profileParam && profileParam !== currentProfileId && profiles.find(pr => pr.id === profileParam)) {
+    currentProfileId = profileParam;
+    localStorage.setItem('fitCurrentProfile', currentProfileId);
+    loadProfileData(); // re-load data for the target profile
+  }
+  if (p.has('day'))    currentDay     = parseInt(p.get('day'))    || currentDay;
+  if (p.has('week'))   currentWeek    = parseInt(p.get('week'))   || currentWeek;
+  if (p.has('nutday')) currentNutDay  = p.get('nutday') || currentNutDay;
+  window._previewTab = p.get('tab') || null;
+})();
+
 renderSelectors();
 renderTraining();
 renderMeals();
 renderProfileMenu();
+
+if (window._previewTab) {
+  showTab(window._previewTab);
+  window._previewTab = null;
+}
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeVideoModal();
@@ -2420,3 +2459,244 @@ document.addEventListener('keydown', e => {
     e.target.blur();
   }
 });
+
+
+// ============================================================
+// RENDEZ-VOUS COACHING
+// ============================================================
+
+const RDV_DAYS   = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+const RDV_HOURS  = [8,9,10,11,12,13,14,15,16,17,18,19,20];
+const RDV_STORE  = 'rdv_slots';     // coach availability  { "lundi_14": true, ... }
+const RDV_BOOK   = 'rdv_bookings';  // bookings            { "lundi_14": { name, profileId, ts } }
+
+function _rdvKey(day, hour) { return day.toLowerCase() + '_' + hour; }
+
+function _rdvSlots() {
+  return JSON.parse(localStorage.getItem(pk(RDV_STORE)) || '{}');
+}
+function _rdvBookings() {
+  return JSON.parse(localStorage.getItem(pk(RDV_BOOK)) || '{}');
+}
+function _rdvSaveSlots(s)    { localStorage.setItem(pk(RDV_STORE), JSON.stringify(s)); }
+function _rdvSaveBookings(b) { localStorage.setItem(pk(RDV_BOOK),  JSON.stringify(b)); }
+
+let _rdvDay = RDV_DAYS[0];
+
+function renderRdvTab() {
+  const root = document.getElementById('rdv-root');
+  if (!root) return;
+  const coach = typeof isCoach === 'function' && isCoach();
+  root.innerHTML = '';
+  root.appendChild(coach ? _rdvBuildCoachView() : _rdvBuildStudentView());
+}
+
+// ── Day selector (shared) ────────────────────────────────────
+function _rdvDaySelector(onSelect) {
+  const wrap = document.createElement('div');
+  wrap.className = 'rdv-day-selector';
+  RDV_DAYS.forEach(d => {
+    const btn = document.createElement('button');
+    btn.className = 'rdv-day-btn' + (d === _rdvDay ? ' active' : '');
+    btn.textContent = d.slice(0,3);
+    btn.onclick = () => { _rdvDay = d; onSelect(); };
+    wrap.appendChild(btn);
+  });
+  return wrap;
+}
+
+// ── COACH VIEW ───────────────────────────────────────────────
+function _rdvBuildCoachView() {
+  const container = document.createElement('div');
+  container.className = 'rdv-container';
+
+  const title = document.createElement('div');
+  title.className = 'rdv-section-title';
+  title.innerHTML = '<span class="rdv-icon">📅</span> Gestion des créneaux';
+  container.appendChild(title);
+
+  const sub = document.createElement('p');
+  sub.className = 'rdv-subtitle';
+  sub.textContent = 'Activez vos créneaux disponibles pour la semaine.';
+  container.appendChild(sub);
+
+  container.appendChild(_rdvDaySelector(() => {
+    container.innerHTML = '';
+    container.appendChild(_rdvBuildCoachView().firstChild.nextSibling
+      ? _rdvBuildCoachView() : _rdvBuildCoachView());
+    renderRdvTab();
+  }));
+
+  const grid = document.createElement('div');
+  grid.className = 'rdv-grid';
+  const slots    = _rdvSlots();
+  const bookings = _rdvBookings();
+
+  RDV_HOURS.forEach(h => {
+    const key     = _rdvKey(_rdvDay, h);
+    const avail   = !!slots[key];
+    const booking = bookings[key];
+    const card    = document.createElement('div');
+    card.className = 'rdv-slot-card' + (avail ? ' rdv-slot-avail' : '') + (booking ? ' rdv-slot-booked' : '');
+
+    const timeEl = document.createElement('span');
+    timeEl.className = 'rdv-slot-time';
+    timeEl.textContent = h + ':00 – ' + (h+1) + ':00';
+    card.appendChild(timeEl);
+
+    if (booking) {
+      const nameEl = document.createElement('span');
+      nameEl.className = 'rdv-slot-name';
+      nameEl.textContent = booking.name || 'Client';
+      card.appendChild(nameEl);
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'rdv-cancel-btn';
+      cancelBtn.textContent = 'Annuler';
+      cancelBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (confirm('Annuler le RDV de ' + (booking.name || 'ce client') + ' ?')) {
+          const b = _rdvBookings(); delete b[key]; _rdvSaveBookings(b);
+          renderRdvTab();
+        }
+      };
+      card.appendChild(cancelBtn);
+    } else {
+      const badge = document.createElement('span');
+      badge.className = 'rdv-slot-badge';
+      badge.textContent = avail ? 'Disponible' : 'Fermé';
+      card.appendChild(badge);
+      card.onclick = () => {
+        const s = _rdvSlots();
+        if (s[key]) delete s[key]; else s[key] = true;
+        _rdvSaveSlots(s);
+        renderRdvTab();
+      };
+    }
+    grid.appendChild(card);
+  });
+  container.appendChild(grid);
+  return container;
+}
+
+// ── STUDENT VIEW ─────────────────────────────────────────────
+function _rdvBuildStudentView() {
+  const container = document.createElement('div');
+  container.className = 'rdv-container';
+
+  // Next RDV banner
+  const bookings = _rdvBookings();
+  const myId     = currentProfileId;
+  const myBookings = Object.entries(bookings)
+    .filter(([,b]) => b.profileId === myId)
+    .map(([k,b]) => ({ key:k, ...b }));
+
+  if (myBookings.length) {
+    const banner = document.createElement('div');
+    banner.className = 'rdv-banner';
+    const bannerTitle = document.createElement('div');
+    bannerTitle.className = 'rdv-banner-title';
+    bannerTitle.textContent = 'Prochain RDV';
+    banner.appendChild(bannerTitle);
+    myBookings.forEach(bk => {
+      const [dayKey, hourStr] = bk.key.split('_');
+      const h = parseInt(hourStr);
+      const dayLabel = RDV_DAYS.find(d => d.toLowerCase() === dayKey) || dayKey;
+      const row = document.createElement('div');
+      row.className = 'rdv-banner-row';
+      const info = document.createElement('span');
+      info.textContent = dayLabel + ' ' + h + ':00 – ' + (h+1) + ':00';
+      row.appendChild(info);
+      const now = Date.now();
+      const canCancel = !bk.ts || (bk.ts - now > 86400000);
+      if (canCancel) {
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'rdv-cancel-btn';
+        cancelBtn.textContent = 'Annuler';
+        cancelBtn.onclick = () => {
+          if (confirm('Annuler ce rendez-vous ?')) {
+            const b = _rdvBookings(); delete b[bk.key]; _rdvSaveBookings(b);
+            renderRdvTab();
+          }
+        };
+        row.appendChild(cancelBtn);
+      } else {
+        const note = document.createElement('span');
+        note.className = 'rdv-cancel-note';
+        note.textContent = '< 24h, non annulable';
+        row.appendChild(note);
+      }
+      banner.appendChild(row);
+    });
+    container.appendChild(banner);
+  }
+
+  const title = document.createElement('div');
+  title.className = 'rdv-section-title';
+  title.innerHTML = '<span class="rdv-icon">📅</span> Rendez-Vous Coaching';
+  container.appendChild(title);
+
+  container.appendChild(_rdvDaySelector(() => renderRdvTab()));
+
+  const slots = _rdvSlots();
+  const availForDay = RDV_HOURS.filter(h => slots[_rdvKey(_rdvDay, h)]);
+
+  if (!availForDay.length) {
+    const empty = document.createElement('p');
+    empty.className = 'rdv-empty';
+    empty.textContent = 'Aucun créneau disponible ce jour.';
+    container.appendChild(empty);
+    return container;
+  }
+
+  const grid = document.createElement('div');
+  grid.className = 'rdv-grid';
+
+  availForDay.forEach(h => {
+    const key     = _rdvKey(_rdvDay, h);
+    const booking = bookings[key];
+    const ismine  = booking && booking.profileId === myId;
+    const taken   = booking && !ismine;
+
+    const card = document.createElement('div');
+    card.className = 'rdv-slot-card rdv-slot-avail' + (taken ? ' rdv-slot-taken' : '') + (ismine ? ' rdv-slot-mine' : '');
+
+    const timeEl = document.createElement('span');
+    timeEl.className = 'rdv-slot-time';
+    timeEl.textContent = h + ':00 – ' + (h+1) + ':00';
+    card.appendChild(timeEl);
+
+    if (taken) {
+      const b2 = document.createElement('span');
+      b2.className = 'rdv-slot-badge';
+      b2.textContent = 'Réservé';
+      card.appendChild(b2);
+      card.style.opacity = '0.4';
+    } else if (ismine) {
+      const b2 = document.createElement('span');
+      b2.className = 'rdv-slot-badge rdv-badge-mine';
+      b2.textContent = '✓ Votre séance';
+      card.appendChild(b2);
+    } else {
+      const btn = document.createElement('button');
+      btn.className = 'rdv-book-btn';
+      btn.textContent = 'Réserver';
+      btn.onclick = () => _rdvConfirm(_rdvDay, h);
+      card.appendChild(btn);
+    }
+    grid.appendChild(card);
+  });
+  container.appendChild(grid);
+  return container;
+}
+
+function _rdvConfirm(day, hour) {
+  const profile = profiles.find(p => p.id === currentProfileId);
+  const name    = profile ? profile.name : 'Vous';
+  const msg     = 'Confirmer la séance de coaching\n' + day + ' à ' + hour + ':00 – ' + (hour+1) + ':00 ?';
+  if (!confirm(msg)) return;
+  const key = _rdvKey(day, hour);
+  const b   = _rdvBookings();
+  b[key]    = { profileId: currentProfileId, name, ts: Date.now() + 86400000 * 2 };
+  _rdvSaveBookings(b);
+  renderRdvTab();
+}
