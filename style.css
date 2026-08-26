@@ -2842,6 +2842,149 @@ body {
   flex: 1;
 }
 
+/* ============================================================
+   PLAN OVERLAY (student programme picker)
+   ============================================================ */
+.plan-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.plan-overlay--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (max-width: 480px) {
+  .plan-overlay {
+    top: calc(44px + env(safe-area-inset-top));
+    bottom: calc(56px + env(safe-area-inset-bottom));
+  }
+}
+
+.plan-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.plan-overlay-back {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.plan-overlay-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.plan-overlay-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.plan-week-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.plan-week-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.plan-week-label {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text);
+}
+.plan-week-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.plan-days-row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.plan-days-row::-webkit-scrollbar { display: none; }
+
+.plan-day-card {
+  flex: 0 0 140px;
+  min-height: 110px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.plan-day-card:active {
+  background: rgba(200,255,0,0.07);
+  border-color: rgba(200,255,0,0.4);
+}
+.plan-day-card--active {
+  border-color: var(--accent);
+  background: rgba(200,255,0,0.07);
+}
+.plan-day-card--extra {
+  border-style: dashed;
+  border-color: rgba(200,255,0,0.35);
+}
+.plan-day-icon {
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.plan-day-card--active .plan-day-icon { color: var(--accent); }
+.plan-day-sub {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.plan-day-name {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.2;
+}
+.plan-day-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* ============================================================ */
 .sdo-bilan-summary {
   margin: 0 12px;
   width: auto;

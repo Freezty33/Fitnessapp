@@ -275,7 +275,6 @@ function renderSelectors() {
   const dayContainer = document.getElementById('day-btns-container');
   if (dayContainer) {
     let html = '';
-    // Extra training button comes first, only when one exists for this week
     if (extraTrainings[currentWeek]) {
       html += `<button class="day-btn extra-btn${currentViewingExtra ? ' active' : ''}" onclick="selectExtra(this)">Entr. supp.</button>`;
     }
@@ -284,7 +283,6 @@ function renderSelectors() {
     }
     dayContainer.innerHTML = html;
   }
-  // Week buttons
   const weekContainer = document.getElementById('week-btns-container');
   if (weekContainer) {
     let html = '';
@@ -293,6 +291,113 @@ function renderSelectors() {
     }
     weekContainer.innerHTML = html;
   }
+
+  // Show coach selectors or student plan button depending on role
+  const heroSel  = document.getElementById('hero-selectors');
+  const planWrap = document.getElementById('student-plan-btn-wrap');
+  const coach    = typeof isCoach === 'function' && isCoach();
+  if (heroSel)  heroSel.style.display  = coach ? '' : 'none';
+  if (planWrap) planWrap.style.display = coach ? 'none' : '';
+}
+
+// ── Plan overlay (student) ────────────────────────────────────
+function openPlanOverlay() {
+  if (document.getElementById('plan-overlay')) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'plan-overlay';
+  overlay.className = 'plan-overlay';
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'plan-overlay-header';
+  header.innerHTML = `
+    <button class="plan-overlay-back" onclick="closePlanOverlay()">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15,18 9,12 15,6"/></svg>
+    </button>
+    <span class="plan-overlay-title">MON PROGRAMME</span>
+    <span></span>`;
+  overlay.appendChild(header);
+
+  // Scrollable body
+  const body = document.createElement('div');
+  body.className = 'plan-overlay-body';
+
+  for (let w = 1; w <= weekCount; w++) {
+    const weekSection = document.createElement('div');
+    weekSection.className = 'plan-week-section';
+
+    const weekHeader = document.createElement('div');
+    weekHeader.className = 'plan-week-header';
+    weekHeader.innerHTML = `<span class="plan-week-label">Semaine ${w}</span><span class="plan-week-count">${dayCount} jour${dayCount > 1 ? 's' : ''}</span>`;
+    weekSection.appendChild(weekHeader);
+
+    const row = document.createElement('div');
+    row.className = 'plan-days-row';
+
+    for (let d = 1; d <= dayCount; d++) {
+      const dayData   = trainingData.days[d] || {};
+      const label     = dayData.label || `Jour ${d}`;
+      const exCount   = (dayData.exercises || []).length;
+      const wIdx      = w - 1;
+      const doneCount = (dayData.exercises || []).filter(ex => {
+        const wd = ex.weeks && ex.weeks[wIdx];
+        return wd && String(wd.done || '').trim();
+      }).length;
+      const isActive  = d === currentDay && w === currentWeek;
+
+      const card = document.createElement('button');
+      card.className = 'plan-day-card' + (isActive ? ' plan-day-card--active' : '');
+      card.innerHTML = `
+        <svg class="plan-day-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 4v16M18 4v16M6 9h12M6 15h12"/></svg>
+        <span class="plan-day-sub">Jour ${d}</span>
+        <span class="plan-day-name">${h(label)}</span>
+        <span class="plan-day-meta">${exCount} exercice${exCount !== 1 ? 's' : ''}${doneCount > 0 ? ` · ${doneCount}✓` : ''}</span>`;
+      card.addEventListener('click', () => {
+        currentDay  = d;
+        currentWeek = w;
+        currentViewingExtra = false;
+        renderSelectors();
+        renderTraining();
+        closePlanOverlay();
+      });
+      row.appendChild(card);
+    }
+
+    // Extra training card if exists for this week
+    if (extraTrainings[w]) {
+      const card = document.createElement('button');
+      card.className = 'plan-day-card plan-day-card--extra' + (currentViewingExtra && w === currentWeek ? ' plan-day-card--active' : '');
+      const exCount = (extraTrainings[w].exercises || []).length;
+      card.innerHTML = `
+        <svg class="plan-day-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <span class="plan-day-sub">Extra</span>
+        <span class="plan-day-name">Entr. supp.</span>
+        <span class="plan-day-meta">${exCount} exercice${exCount !== 1 ? 's' : ''}</span>`;
+      card.addEventListener('click', () => {
+        currentWeek = w;
+        currentViewingExtra = true;
+        renderSelectors();
+        renderTraining();
+        closePlanOverlay();
+      });
+      row.appendChild(card);
+    }
+
+    weekSection.appendChild(row);
+    body.appendChild(weekSection);
+  }
+
+  overlay.appendChild(body);
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('plan-overlay--visible'));
+}
+
+function closePlanOverlay() {
+  const overlay = document.getElementById('plan-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('plan-overlay--visible');
+  overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
 }
 
 function selectWeek(w, btn) {
