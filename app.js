@@ -138,6 +138,7 @@ function _saveStudentPlanToSupabase() {
           target_series:  firstWeek ? (parseInt(firstWeek.series) || null) : null,
           target_reps:    firstWeek ? String(firstWeek.reps || '') : '',
           target_charge:  firstWeek ? (parseFloat(firstWeek.charge) || null) : null,
+          weeks_data:     ex.weeks || [],
         });
       });
     });
@@ -3044,16 +3045,28 @@ function _adaptPlanToLocal(plan) {
     if (!days[a.day_number]) {
       days[a.day_number] = { label: `Jour ${a.day_number}`, exercises: [] };
     }
-    days[a.day_number].exercises.push({
-      name:  a.name,
-      tips:  a.tips || '',
-      weeks: Array.from({ length: plan.week_count }, () => ({
+    let weeks;
+    if (a.weeks_data && a.weeks_data.length) {
+      const local = trainingData.days[a.day_number];
+      const localEx = local && (local.exercises || []).find(e => e.name === a.name);
+      weeks = a.weeks_data.map((w, i) => ({
+        series: w.series ?? '',
+        reps:   w.reps   ?? '',
+        charge: w.charge ?? '',
+        done:   (localEx && localEx.weeks[i] && localEx.weeks[i].done) || '',
+      }));
+      while (weeks.length < plan.week_count) {
+        weeks.push({ series: '', reps: '', charge: '', done: '' });
+      }
+    } else {
+      weeks = Array.from({ length: plan.week_count }, () => ({
         series: a.target_series ?? '',
         reps:   a.target_reps   ?? '',
         charge: a.target_charge ?? '',
-        done:   ''
-      }))
-    });
+        done:   '',
+      }));
+    }
+    days[a.day_number].exercises.push({ name: a.name, tips: a.tips || '', weeks });
   });
   return days;
 }
