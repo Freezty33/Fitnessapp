@@ -2834,11 +2834,17 @@ body {
   display: flex;
   gap: 10px;
   padding: 12px 0 4px;
+  margin: 0 12px;
   justify-content: center;
 }
 .seance-actions .btn-add-exercise,
 .seance-actions .btn-download-pdf {
   flex: 1;
+}
+
+.sdo-bilan-summary {
+  margin: 0 12px;
+  width: auto;
 }
 
 /* ============================================================
