@@ -354,7 +354,6 @@ function _renderExtraTraining(grid) {
     <div class="day-header">
       <h2 class="editable-title">Entraînement supplémentaire</h2>
       <span class="week-badge">Semaine ${currentWeek}</span>
-      <button class="extra-training-delete-btn" onclick="deleteExtraTraining()" title="Supprimer cet entraînement supplémentaire">🗑 Supprimer</button>
     </div>
     <div class="exercises-list">${rows}</div>`;
 }
@@ -428,6 +427,7 @@ function addDay() {
 }
 
 function removeDay() {
+  if (currentViewingExtra) { deleteExtraTraining(); return; }
   const d = currentDay;
   if (dayCount <= 1) {
     if (!confirm(`Effacer tous les exercices de Jour 1 ?`)) return;
@@ -2948,17 +2948,19 @@ async function loadStudentData(studentId) {
     .maybeSingle();
 
   if (plan) {
-    // Only use Supabase plan if there is no locally-saved training for this student.
-    // Once a student's plan exists in localStorage it is the source of truth —
-    // Supabase is used only for first-load on a new device.
-    const hasLocal = !!localStorage.getItem(pk('training'));
-    if (!hasLocal) {
+    // Reload from Supabase whenever the coach has saved a newer version.
+    // Compare ISO timestamps: remote wins if no local timestamp exists or if remote is newer.
+    const localTs  = localStorage.getItem(pk('planUpdatedAt'));
+    const remoteTs = plan.updated_at;
+    const remoteIsNewer = !localTs || (remoteTs && remoteTs > localTs);
+    if (remoteIsNewer) {
       weekCount = plan.week_count;
       dayCount  = plan.day_count;
       trainingData.days = _adaptPlanToLocal(plan);
-      localStorage.setItem(pk('training'),  JSON.stringify(trainingData.days));
-      localStorage.setItem(pk('weekCount'), weekCount);
-      localStorage.setItem(pk('dayCount'),  dayCount);
+      localStorage.setItem(pk('training'),      JSON.stringify(trainingData.days));
+      localStorage.setItem(pk('weekCount'),     weekCount);
+      localStorage.setItem(pk('dayCount'),      dayCount);
+      localStorage.setItem(pk('planUpdatedAt'), remoteTs || new Date().toISOString());
       renderSelectors();
       renderTraining();
       _renderSeanceFooter(currentDay + '_' + currentWeek);
