@@ -202,6 +202,7 @@ const TAB_LABELS = {
 };
 
 function showTab(tab) {
+  if (_wm) _wmClose();
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.nav-drawer-btn').forEach(b => b.classList.remove('active'));
@@ -213,9 +214,26 @@ function showTab(tab) {
   }
   const lbl = document.getElementById('nav-mobile-label');
   if (lbl) lbl.textContent = TAB_LABELS[tab] || tab;
+  // Sync bottom tab bar
+  document.querySelectorAll('.btab').forEach(b => b.classList.remove('active'));
+  const btab = document.getElementById('btab-' + tab);
+  if (btab) btab.classList.add('active');
   if (tab === 'graphs') initCharts();
   if (tab === 'nutrition') renderMeals();
   if (tab === 'photos') renderPhotosTab();
+  if (tab === 'rdv') renderRdvTab();
+}
+
+function _updateTrainingTabDot() {
+  const dot = document.getElementById('btab-dot-training');
+  if (!dot) return;
+  const dayData = trainingData.days[currentDay] || { exercises: [] };
+  const wIdx = currentWeek - 1;
+  const hasIncomplete = dayData.exercises.some(ex => {
+    const w = ex.weeks && ex.weeks[wIdx];
+    return !w || !String(w.done || '').trim();
+  });
+  dot.classList.toggle('visible', hasIncomplete && dayData.exercises.length > 0);
 }
 
 function toggleMobileNav() {
@@ -355,6 +373,7 @@ function _renderExtraTraining(grid) {
     <div class="day-header">
       <h2 class="editable-title">Entraînement supplémentaire</h2>
       <span class="week-badge">Semaine ${currentWeek}</span>
+      <button class="extra-training-delete-btn" onclick="deleteExtraTraining()" title="Supprimer cet entraînement supplémentaire">🗑 Supprimer</button>
     </div>
     <div class="exercises-list">${rows}</div>`;
 }
@@ -428,7 +447,6 @@ function addDay() {
 }
 
 function removeDay() {
-  if (currentViewingExtra) { deleteExtraTraining(); return; }
   const d = currentDay;
   if (dayCount <= 1) {
     if (!confirm(`Effacer tous les exercices de Jour 1 ?`)) return;
@@ -543,6 +561,491 @@ function removeWeek() {
 }
 
 // ============================================================
+// STUDENT MOBILE — WORKOUT MODE
+// ============================================================
+let _wm = null; // { exercises, wIdx, current, overlay }
+
+function _renderStudentDayOverview(grid, dayData, wIdx) {
+  const exercises = dayData.exercises || [];
+  const totalExs = exercises.length;
+  const completedCount = exercises.filter(ex => {
+    const w = ex.weeks && ex.weeks[wIdx];
+    return w && String(w.done || '').trim() && String(w.done || '').trim() !== '—';
+  }).length;
+  const allDone = totalExs > 0 && completedCount === totalExs;
+
+  const hasVoice = exercises.some(ex => savedVoice[currentDay + '_' + ex.name]);
+
+  let rowsHtml = '';
+  exercises.forEach((ex, i) => {
+    const w = ex.weeks && ex.weeks[wIdx] || {};
+    const series = w.series !== undefined && w.series !== '' ? w.series : null;
+    const reps   = w.reps   !== undefined && w.reps   !== '' ? w.reps   : null;
+    const charge = w.charge !== undefined && w.charge !== '' ? w.charge : null;
+    const done   = String(w.done || '').trim();
+    const isDone = done && done !== '—';
+    let targetParts = [];
+    if (series) targetParts.push(series + ' séries');
+    if (reps)   targetParts.push(reps + ' reps');
+    if (charge) targetParts.push('@ ' + charge + ' kg');
+    const targetLine = targetParts.join(' · ');
+    const vKey = currentDay + '_' + ex.name;
+    const hasV = !!savedVoice[vKey];
+    rowsHtml += `
+      <div class="sdo-ex-row ${isDone ? 'sdo-ex-done' : ''}" onclick="startWorkoutMode(${i})">
+        <div class="sdo-ex-num">${isDone ? '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="4,10 8,14 16,6"/></svg>' : (i + 1)}</div>
+        <div class="sdo-ex-info">
+          <span class="sdo-ex-name">${h(ex.name)}</span>
+          ${targetLine ? `<span class="sdo-ex-target">${h(targetLine)}</span>` : ''}
+        </div>
+        <div class="sdo-ex-right">
+          ${hasV ? '<span class="sdo-voice-chip">🎙</span>' : ''}
+          <svg class="sdo-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9,18 15,12 9,6"/></svg>
+        </div>
+      </div>`;
+  });
+
+  const progressPct = totalExs > 0 ? Math.round(completedCount / totalExs * 100) : 0;
+  const fbKey = currentDay + '_' + currentWeek;
+  const fb = workoutFeedback[fbKey] || {};
+  const hasFeedback = fb.rating > 0 || (fb.note || '').trim() || (fb.pain || []).length;
+
+  grid.innerHTML = `
+    <div class="sdo-container">
+      <div class="sdo-hero">
+        <div class="sdo-hero-content">
+          <span class="sdo-week-badge">Semaine ${currentWeek}</span>
+          <h2 class="sdo-day-title">${h(dayData.label)}</h2>
+          <div class="sdo-meta">
+            <span>${totalExs} exercice${totalExs > 1 ? 's' : ''}</span>
+            ${completedCount > 0 ? `<span class="sdo-meta-dot">·</span><span>${completedCount}/${totalExs} terminés</span>` : ''}
+          </div>
+        </div>
+        ${totalExs > 0 ? `<div class="sdo-progress-ring-wrap">
+          <svg class="sdo-progress-ring" viewBox="0 0 40 40" width="40" height="40">
+            <circle cx="20" cy="20" r="16" fill="none" stroke="var(--border)" stroke-width="3"/>
+            <circle cx="20" cy="20" r="16" fill="none" stroke="var(--accent)" stroke-width="3"
+              stroke-dasharray="${Math.round(16 * 2 * Math.PI * progressPct / 100)} ${Math.round(16 * 2 * Math.PI * (100 - progressPct) / 100)}"
+              stroke-linecap="round" stroke-dashoffset="${Math.round(16 * 2 * Math.PI * 0.25)}"
+              transform="rotate(-90 20 20)"/>
+            <text x="20" y="24" text-anchor="middle" font-size="10" fill="var(--text)" font-weight="700">${progressPct}%</text>
+          </svg>
+        </div>` : ''}
+      </div>
+
+      ${totalExs > 0 ? `
+      <div class="sdo-exercises">${rowsHtml}</div>
+
+      <div class="sdo-cta-wrap">
+        ${allDone
+          ? `<button class="sdo-cta sdo-cta-done" onclick="openBilanOverlay('${fbKey}')">
+               ${hasFeedback ? '✏️ Modifier le bilan' : '✅ Séance terminée — Bilan'}
+             </button>`
+          : `<button class="sdo-cta" onclick="startWorkoutMode(0)">
+               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+               ${completedCount > 0 ? 'Continuer la séance' : 'Commencer la séance'}
+             </button>`
+        }
+        ${hasFeedback && !allDone ? `<button class="sdo-cta-secondary" onclick="openBilanOverlay('${fbKey}')">Voir le bilan</button>` : ''}
+      </div>
+      ` : `
+      <div class="sdo-empty">
+        <p>Aucun exercice pour cette journée</p>
+      </div>
+      `}
+
+      ${hasFeedback ? `
+      <div class="bilan-summary sdo-bilan-summary" id="bilan-summary">
+        <div class="bilan-summary-header">
+          <span class="bilan-summary-title">Bilan de la séance</span>
+          <div class="sum-stars">${[1,2,3,4,5].map(n => `<span class="sum-star${n <= fb.rating ? ' lit' : ''}">★</span>`).join('')}</div>
+        </div>
+        ${fb.note ? `<p class="bilan-summary-note">${h(fb.note)}</p>` : ''}
+        ${(fb.pain||[]).length ? `<p class="bilan-summary-pain">🔴 ${fb.pain.length} zone${fb.pain.length > 1 ? 's' : ''} douloureuse${fb.pain.length > 1 ? 's' : ''}</p>` : ''}
+      </div>` : ''}
+
+      <div class="seance-actions">
+        <button class="btn-add-exercise" onclick="addExercise()">+ Exercice</button>
+        <button class="btn-download-pdf" onclick="downloadPlanPDF()" title="Télécharger le programme en PDF">⬇ PDF</button>
+      </div>
+    </div>`;
+}
+
+function startWorkoutMode(startIdx) {
+  const dayData = trainingData.days[currentDay] || { exercises: [] };
+  const exercises = dayData.exercises || [];
+  if (!exercises.length) return;
+  const wIdx = currentWeek - 1;
+
+  _wm = { exercises, wIdx, current: startIdx };
+
+  const overlay = document.createElement('div');
+  overlay.id = 'workout-overlay';
+  overlay.className = 'workout-overlay';
+  document.body.appendChild(overlay);
+  _wm.overlay = overlay;
+
+  // Swipe detection
+  let touchStartX = 0;
+  overlay.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, { passive: true });
+  overlay.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 60) {
+      if (dx < 0) _wmNext();
+      else _wmPrev();
+    }
+  });
+
+  _wmRender();
+}
+
+function _wmClose() {
+  if (_wm && _wm.overlay) _wm.overlay.remove();
+  _wm = null;
+  if (_wmTimerState) { clearInterval(_wmTimerState.interval); _wmTimerState = null; }
+  renderTraining();
+}
+
+function _wmNext() {
+  if (!_wm) return;
+  saveWmDone();
+  saveWmCharge();
+  if (_wm.current < _wm.exercises.length - 1) {
+    _wm.current++;
+    if (_wmTimerState) { clearInterval(_wmTimerState.interval); _wmTimerState = null; }
+    _wmRender('next');
+  }
+}
+
+function _wmPrev() {
+  if (!_wm) return;
+  saveWmDone();
+  saveWmCharge();
+  if (_wm.current > 0) {
+    _wm.current--;
+    if (_wmTimerState) { clearInterval(_wmTimerState.interval); _wmTimerState = null; }
+    _wmRender('prev');
+  }
+}
+
+function _wmRender(dir) {
+  if (!_wm || !_wm.overlay) return;
+  const { exercises, wIdx, current, overlay } = _wm;
+  const ex      = exercises[current];
+  const w       = (ex.weeks && ex.weeks[wIdx]) || {};
+  const total   = exercises.length;
+  const isFirst = current === 0;
+  const isLast  = current === total - 1;
+
+  const series = w.series !== undefined && w.series !== '' ? String(w.series) : '—';
+  const reps   = w.reps   !== undefined && w.reps   !== '' ? String(w.reps)   : '—';
+  const charge = w.charge !== undefined && w.charge !== '' ? String(w.charge) : '—';
+  const chargeDisp = charge !== '—' ? charge + ' kg' : '—';
+  const done   = String(w.done || '');
+
+  const progressPct = Math.round((current + 1) / total * 100);
+
+  // Previous week hint
+  let prevHint = '';
+  if (wIdx > 0) {
+    const prevW = ex.weeks && ex.weeks[wIdx - 1];
+    const prevDone = prevW && String(prevW.done || '').trim();
+    if (prevDone && prevDone !== '—') {
+      prevHint = `<span class="wm-prev-hint">S${wIdx} : ${h(prevDone)}</span>`;
+    }
+  }
+
+  // Voice note
+  const vKey = currentDay + '_' + ex.name;
+  const hasVoice = !!savedVoice[vKey];
+  let voiceHtml = '';
+  if (hasVoice) {
+    voiceHtml = `
+      <div class="wm-voice">
+        <audio id="wm-voice-audio" preload="metadata"></audio>
+        <div class="voice-player" id="wm-voice-player">
+          <button class="voice-play-btn" id="wm-voice-play" onclick="toggleWmVoicePlay()" title="Note du coach">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <div class="voice-progress-wrap" id="wm-voice-prog-wrap" onclick="seekWmVoice(event)">
+            <div class="voice-progress-bar" id="wm-voice-prog"></div>
+          </div>
+          <span class="voice-time" id="wm-voice-time">0:00</span>
+          <span class="wm-voice-label">Note coach</span>
+        </div>
+      </div>`;
+  }
+
+  const defaultSecs = timerDefaults[ex.name] || 90;
+
+  overlay.innerHTML = `
+    <div class="wm-header">
+      <button class="wm-close" onclick="_wmClose()">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <div class="wm-progress-wrap">
+        <div class="wm-progress-bar" style="width:${progressPct}%"></div>
+      </div>
+      <span class="wm-count">${current + 1} / ${total}</span>
+    </div>
+
+    <div class="wm-body">
+      <div class="wm-ex-title-row">
+        <div class="wm-ex-title-text">
+          <h2 class="wm-ex-name">${h(ex.name)}</h2>
+          ${ex.tips ? `<p class="wm-ex-tips">${h(ex.tips)}</p>` : `<p class="wm-ex-tips wm-ex-tips-empty">Ajouter des conseils...</p>`}
+        </div>
+        <button class="wm-delete-btn" onclick="_wmDeleteExercise(${current})" title="Supprimer">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14H6L5,6"/><path d="M10,11v6M14,11v6"/><path d="M9,6V4h6v2"/></svg>
+        </button>
+      </div>
+
+      ${voiceHtml || `<button class="wm-voice-add-btn" onclick="openVoiceModal('${h(currentDay)}_${h(ex.name)}')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        Note coach
+      </button>`}
+
+      <div class="wm-objectif-card">
+        <span class="wm-card-label">OBJECTIF</span>
+        <span class="wm-objectif-val">${series} × ${reps} <span class="wm-objectif-charge">${chargeDisp}</span></span>
+      </div>
+
+      <div class="wm-stats-row">
+        <div class="wm-stat-card">
+          <span class="wm-stat-label">SÉRIES</span>
+          <span class="wm-stat-val">${series}</span>
+        </div>
+        <div class="wm-stat-card">
+          <span class="wm-stat-label">REPS</span>
+          <span class="wm-stat-val">${reps}</span>
+        </div>
+        <div class="wm-stat-card wm-stat-card--editable">
+          <span class="wm-stat-label">CHARGE (KG)</span>
+          <span class="wm-stat-val" contenteditable="true" id="wm-charge-input"
+                inputmode="decimal" onblur="saveWmCharge()">${charge !== '—' ? charge : ''}</span>
+        </div>
+      </div>
+
+      <div class="wm-done-card">
+        <span class="wm-card-label">REPS & SÉRIES RÉALISÉS</span>
+        <span class="wm-done-input" contenteditable="true" id="wm-done-input"
+              onblur="saveWmDone()">${h(done)}</span>
+        ${prevHint}
+      </div>
+
+      <div class="wm-repos-card">
+        <div class="wm-repos-top">
+          <span class="wm-repos-label">Repos</span>
+          <input class="wm-timer-input" type="number" min="5" max="600"
+                 value="${defaultSecs}" id="wm-timer-secs"
+                 onchange="wmSetTimerDefault(this.value)">
+          <span class="wm-repos-unit">s</span>
+        </div>
+        <div class="wm-repos-controls">
+          <button class="wm-timer-btn" id="wm-timer-btn" onclick="toggleWmTimer()">▶</button>
+          <span class="wm-timer-val" id="wm-timer-val">${defaultSecs}</span>
+          <span class="wm-timer-unit">s</span>
+          <button class="wm-timer-reset" onclick="resetWmTimer()">↺</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="wm-nav">
+      <button class="wm-btn-prev ${isFirst ? 'wm-btn-disabled' : ''}" onclick="_wmPrev()" ${isFirst ? 'disabled' : ''}>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15,18 9,12 15,6"/></svg>
+        Précédent
+      </button>
+      ${isLast
+        ? `<button class="wm-btn-finish" onclick="_wmFinish()">Terminer la séance</button>`
+        : `<button class="wm-btn-next" onclick="_wmNext()">
+             Suivant
+             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9,18 15,12 9,6"/></svg>
+           </button>`
+      }
+    </div>`;
+
+  // Wire voice player after render
+  if (hasVoice) {
+    const audioEl = document.getElementById('wm-voice-audio');
+    if (audioEl) {
+      const dataUrl = savedVoice[vKey];
+      try {
+        const [hdr, b64] = dataUrl.split(',');
+        const mime = hdr.match(/:(.*?);/)[1];
+        const bytes = atob(b64);
+        const buf = new Uint8Array(bytes.length);
+        for (let k = 0; k < bytes.length; k++) buf[k] = bytes.charCodeAt(k);
+        audioEl.src = URL.createObjectURL(new Blob([buf], { type: mime }));
+      } catch (_) { audioEl.src = dataUrl; }
+      _wireWmVoicePlayer(audioEl);
+    }
+  }
+
+  // Slide animation — class on overlay, animation targets .wm-body via CSS descendant
+  if (dir) {
+    overlay.classList.remove('wm-slide-left', 'wm-slide-right');
+    void overlay.offsetWidth;
+    overlay.classList.add(dir === 'next' ? 'wm-slide-left' : 'wm-slide-right');
+    setTimeout(() => overlay.classList.remove('wm-slide-left', 'wm-slide-right'), 300);
+  }
+}
+
+function _wmDeleteExercise(idx) {
+  if (!_wm) return;
+  const ex = _wm.exercises[idx];
+  if (!confirm(`Supprimer « ${ex.name} » ?`)) return;
+  trainingData.days[currentDay].exercises.splice(idx, 1);
+  persistTraining();
+  if (_wm.exercises.length === 0) { _wmClose(); return; }
+  _wm.current = Math.min(idx, _wm.exercises.length - 1);
+  _wmRender();
+}
+
+function saveWmCharge() {
+  if (!_wm) return;
+  const { exercises, wIdx, current } = _wm;
+  const el = document.getElementById('wm-charge-input');
+  if (!el) return;
+  const val = el.textContent.trim();
+  const ex = exercises[current];
+  if (!ex.weeks) ex.weeks = [];
+  while (ex.weeks.length <= wIdx) ex.weeks.push({ series:'', reps:'', charge:'', done:'' });
+  ex.weeks[wIdx].charge = val;
+  trainingData.days[currentDay].exercises[current] = ex;
+  persistTraining();
+  _syncWmLog();
+}
+
+function saveWmDone() {
+  if (!_wm) return;
+  const { exercises, wIdx, current } = _wm;
+  const el = document.getElementById('wm-done-input');
+  if (!el) return;
+  const val = el.textContent.trim();
+  const ex = exercises[current];
+  if (!ex.weeks) ex.weeks = [];
+  while (ex.weeks.length <= wIdx) ex.weeks.push({ series:'', reps:'', charge:'', done:'' });
+  ex.weeks[wIdx].done = val;
+  trainingData.days[currentDay].exercises[current] = ex;
+  persistTraining();
+  updateKPIs();
+  _updateTrainingTabDot();
+  _syncWmLog();
+}
+
+function _syncWmLog() {
+  if (!_wm || typeof activeStudentId !== 'function' || !activeStudentId()) return;
+  const { exercises, wIdx, current } = _wm;
+  const ex = exercises[current];
+  const w  = ex.weeks[wIdx] || {};
+  saveExerciseLog(activeStudentId(), {
+    exercise_name: ex.name,
+    week_number:   wIdx + 1,
+    logged_date:   new Date().toISOString().slice(0, 10),
+    series_done:   String(w.series || ''),
+    reps_done:     String(w.done   || ''),
+    charge_kg:     parseFloat(w.charge) || null,
+    completed:     !!(w.done && String(w.done).trim()),
+  });
+}
+
+function _wmFinish() {
+  saveWmDone();
+  if (_wmTimerState) { clearInterval(_wmTimerState.interval); _wmTimerState = null; }
+  if (_wm && _wm.overlay) _wm.overlay.remove();
+  _wm = null;
+  renderTraining();
+  const fbKey = currentDay + '_' + currentWeek;
+  openBilanOverlay(fbKey);
+}
+
+// Workout mode timer (separate from main timer state)
+let _wmTimerState = null;
+
+function wmSetTimerDefault(val) {
+  const secs = Math.max(5, Math.min(600, parseInt(val) || 90));
+  if (!_wm) return;
+  const ex = _wm.exercises[_wm.current];
+  timerDefaults[ex.name] = secs;
+  localStorage.setItem(pk('timers'), JSON.stringify(timerDefaults));
+  if (!_wmTimerState || !_wmTimerState.running) {
+    const el = document.getElementById('wm-timer-val');
+    if (el) el.textContent = secs;
+    if (_wmTimerState) _wmTimerState.remaining = secs;
+  }
+}
+
+function toggleWmTimer() {
+  const secs = parseInt(document.getElementById('wm-timer-secs').value) || 90;
+  if (!_wmTimerState) {
+    _wmTimerState = { remaining: secs, running: false, interval: null };
+  }
+  if (_wmTimerState.running) {
+    clearInterval(_wmTimerState.interval);
+    _wmTimerState.running = false;
+    const btn = document.getElementById('wm-timer-btn');
+    if (btn) { btn.textContent = '▶'; btn.classList.remove('running'); }
+  } else {
+    _wmTimerState.running = true;
+    const btn = document.getElementById('wm-timer-btn');
+    if (btn) { btn.textContent = '⏸'; btn.classList.add('running'); }
+    _wmTimerState.interval = setInterval(() => {
+      _wmTimerState.remaining--;
+      const el = document.getElementById('wm-timer-val');
+      if (el) el.textContent = Math.max(0, _wmTimerState.remaining);
+      if (_wmTimerState.remaining <= 0) {
+        clearInterval(_wmTimerState.interval);
+        _wmTimerState.running = false;
+        const b = document.getElementById('wm-timer-btn');
+        if (b) { b.textContent = '▶'; b.classList.remove('running'); }
+        if (el) { el.textContent = '🎉'; }
+        playBeep();
+      }
+    }, 1000);
+  }
+}
+
+function resetWmTimer() {
+  if (_wmTimerState) { clearInterval(_wmTimerState.interval); _wmTimerState = null; }
+  const secs = parseInt(document.getElementById('wm-timer-secs').value) || 90;
+  const el = document.getElementById('wm-timer-val');
+  if (el) el.textContent = secs;
+  const btn = document.getElementById('wm-timer-btn');
+  if (btn) { btn.textContent = '▶'; btn.classList.remove('running'); }
+}
+
+// Workout mode voice player
+function _wireWmVoicePlayer(audioEl) {
+  const playBtn  = document.getElementById('wm-voice-play');
+  const progBar  = document.getElementById('wm-voice-prog');
+  const timeEl   = document.getElementById('wm-voice-time');
+  if (!playBtn || !progBar || !timeEl) return;
+  const playIcon  = `<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M8 5v14l11-7z"/></svg>`;
+  const pauseIcon = `<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
+  audioEl.addEventListener('timeupdate', () => {
+    const pct = audioEl.duration ? (audioEl.currentTime / audioEl.duration) * 100 : 0;
+    progBar.style.width = pct + '%';
+    timeEl.textContent = _fmtTime(audioEl.currentTime);
+  });
+  audioEl.addEventListener('ended', () => { playBtn.innerHTML = playIcon; progBar.style.width = '0%'; });
+  audioEl.addEventListener('loadedmetadata', () => { timeEl.textContent = _fmtTime(audioEl.duration); });
+  playBtn.addEventListener('click', () => {
+    if (audioEl.paused) { audioEl.play(); playBtn.innerHTML = pauseIcon; }
+    else { audioEl.pause(); playBtn.innerHTML = playIcon; }
+  });
+}
+
+function toggleWmVoicePlay() { /* handled by _wireWmVoicePlayer */ }
+
+function seekWmVoice(e) {
+  const audioEl = document.getElementById('wm-voice-audio');
+  const wrap    = document.getElementById('wm-voice-prog-wrap');
+  if (!audioEl || !wrap || !audioEl.duration) return;
+  const rect = wrap.getBoundingClientRect();
+  audioEl.currentTime = ((e.clientX - rect.left) / rect.width) * audioEl.duration;
+}
+
+// ============================================================
 // TRAINING — RENDER (inline editable)
 // ============================================================
 function renderTraining() {
@@ -552,6 +1055,19 @@ function renderTraining() {
   // ── Extra training view ──────────────────────────────────────
   if (currentViewingExtra) {
     _renderExtraTraining(grid);
+    return;
+  }
+
+  // ── Student view: show session overview with start CTA ───────
+  // Triggers for real students, OR for a coach viewing a student in the
+  // mobile-preview iframe (390px wide → window.innerWidth ≤ 480).
+  const _isStudent = (typeof isCoach === 'function' && !isCoach()) ||
+                     (window.innerWidth <= 480 && typeof activeStudentId === 'function' && !!activeStudentId());
+  if (_isStudent) {
+    const dayData = trainingData.days[currentDay] || { label: `Jour ${currentDay}`, exercises: [] };
+    _renderStudentDayOverview(grid, dayData, currentWeek - 1);
+    updateKPIs();
+    _updateTrainingTabDot();
     return;
   }
 
@@ -742,6 +1258,7 @@ function renderTraining() {
     _wireVoicePlayer(audioEl, i);
   });
   updateKPIs();
+  _updateTrainingTabDot();
 }
 
 // ============================================================
@@ -1389,6 +1906,7 @@ function saveWeekField(dayId, exIdx, wIdx, field, el) {
   weeks[wIdx][field] = val;
   persistTraining();
   updateKPIs();
+  if (field === 'done') _updateTrainingTabDot();
 
   // Sync to Supabase if authenticated
   if (typeof activeStudentId === 'function' && activeStudentId()) {
@@ -1406,7 +1924,6 @@ function saveWeekField(dayId, exIdx, wIdx, field, el) {
   }
 }
 
-// ============================================================
 async function saveExerciseLog(studentId, log) {
   if (typeof sb === 'undefined' || !studentId) return;
   const { error } = await sb.from('exercise_logs').upsert({
@@ -1423,6 +1940,7 @@ async function saveExerciseLog(studentId, log) {
   if (error) console.warn('[sync] exercise_log', error.message);
 }
 
+// ============================================================
 // REST TIMER (Feature 1)
 // ============================================================
 function setTimerDefault(idx, val) {
@@ -2822,6 +3340,7 @@ function renderProfileMenu() {
 }
 
 function toggleProfileMenu() {
+  if (window.innerWidth <= 480) return;
   const menu = document.getElementById('profile-menu');
   if (!menu) return;
   const open = menu.classList.toggle('open');
@@ -3061,8 +3580,10 @@ function _adaptPlanToLocal(plan) {
     if (!days[a.day_number]) {
       days[a.day_number] = { label: `Jour ${a.day_number}`, exercises: [] };
     }
+    // Use weeks_data if available (full multi-week progression), else fall back to S1 targets
     let weeks;
     if (a.weeks_data && a.weeks_data.length) {
+      // Preserve done values from local cache so student progress isn't wiped
       const local = trainingData.days[a.day_number];
       const localEx = local && (local.exercises || []).find(e => e.name === a.name);
       weeks = a.weeks_data.map((w, i) => ({
@@ -3071,6 +3592,7 @@ function _adaptPlanToLocal(plan) {
         charge: w.charge ?? '',
         done:   (localEx && localEx.weeks[i] && localEx.weeks[i].done) || '',
       }));
+      // Pad if plan week_count grew since last save
       while (weeks.length < plan.week_count) {
         weeks.push({ series: '', reps: '', charge: '', done: '' });
       }
@@ -3462,6 +3984,198 @@ function downloadPlanPDF() {
     iframe.contentWindow.print();
     setTimeout(() => iframe.remove(), 2000);
   }, 600);
+}
+
+// ============================================================
+// RDV COACHING TAB
+// ============================================================
+const RDV_DAYS  = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+const RDV_STORE = 'rdv_slots';
+const RDV_BOOK  = 'rdv_bookings';
+
+function _rdvKey(day, hour) { return day + '_' + hour; }
+function _rdvSlots()    { try { return JSON.parse(localStorage.getItem(pk(RDV_STORE)) || '{}'); } catch(_) { return {}; } }
+function _rdvBookings() { try { return JSON.parse(localStorage.getItem(pk(RDV_BOOK))  || '{}'); } catch(_) { return {}; } }
+function _rdvSaveSlots(s)    { localStorage.setItem(pk(RDV_STORE), JSON.stringify(s)); }
+function _rdvSaveBookings(b) { localStorage.setItem(pk(RDV_BOOK),  JSON.stringify(b)); }
+
+let _rdvDay = RDV_DAYS[0];
+
+function renderRdvTab() {
+  const root = document.getElementById('rdv-root');
+  if (!root) return;
+  root.innerHTML = '';
+  const coach = typeof isCoach === 'function' && isCoach();
+  root.appendChild(coach ? _rdvBuildCoachView() : _rdvBuildStudentView());
+}
+
+function _rdvDayChips(onSelect) {
+  const wrap = document.createElement('div');
+  wrap.className = 'rdv-day-chips';
+  RDV_DAYS.forEach(d => {
+    const btn = document.createElement('button');
+    btn.className = 'rdv-day-chip' + (d === _rdvDay ? ' active' : '');
+    btn.textContent = d;
+    btn.onclick = () => { _rdvDay = d; onSelect(); };
+    wrap.appendChild(btn);
+  });
+  return wrap;
+}
+
+function _rdvBuildCoachView() {
+  const container = document.createElement('div');
+  container.className = 'rdv-container';
+
+  const title = document.createElement('div');
+  title.className = 'rdv-title';
+  title.innerHTML = '📅 <strong>Rendez-Vous Coaching</strong>';
+  container.appendChild(title);
+
+  const refresh = () => {
+    container.innerHTML = '';
+    container.appendChild(title);
+    container.appendChild(_rdvDayChips(refresh));
+    const slots = _rdvSlots();
+    const bookings = _rdvBookings();
+    const grid = document.createElement('div');
+    grid.className = 'rdv-grid';
+    for (let h = 7; h <= 21; h++) {
+      const key = _rdvKey(_rdvDay, h);
+      const isOpen = !!slots[key];
+      const booking = bookings[key];
+      const cell = document.createElement('div');
+      cell.className = 'rdv-slot' + (isOpen ? ' rdv-slot-open' : '') + (booking ? ' rdv-slot-booked' : '');
+      cell.innerHTML = `<span class="rdv-slot-time">${String(h).padStart(2,'0')}:00</span>
+        <span class="rdv-slot-status">${booking ? `✅ ${h(booking.name || 'Réservé')}` : isOpen ? 'Disponible' : '+ Ouvrir'}</span>`;
+      cell.onclick = () => {
+        if (booking) {
+          if (confirm(`Annuler la réservation de ${booking.name || 'ce créneau'} ?`)) {
+            const b = _rdvBookings(); delete b[key]; _rdvSaveBookings(b);
+          }
+        } else {
+          const s = _rdvSlots();
+          if (isOpen) delete s[key]; else s[key] = true;
+          _rdvSaveSlots(s);
+        }
+        refresh();
+      };
+      grid.appendChild(cell);
+    }
+    container.appendChild(grid);
+  };
+
+  container.appendChild(_rdvDayChips(refresh));
+  const slotsInit = _rdvSlots();
+  const bookingsInit = _rdvBookings();
+  const grid = document.createElement('div');
+  grid.className = 'rdv-grid';
+  let anySlot = false;
+  for (let hr = 7; hr <= 21; hr++) {
+    const key = _rdvKey(_rdvDay, hr);
+    const isOpen = !!slotsInit[key];
+    const booking = bookingsInit[key];
+    if (isOpen || booking) anySlot = true;
+    const cell = document.createElement('div');
+    cell.className = 'rdv-slot' + (isOpen ? ' rdv-slot-open' : '') + (booking ? ' rdv-slot-booked' : '');
+    cell.innerHTML = `<span class="rdv-slot-time">${String(hr).padStart(2,'0')}:00</span>
+      <span class="rdv-slot-status">${booking ? `✅ ${booking.name || 'Réservé'}` : isOpen ? 'Disponible' : '+ Ouvrir'}</span>`;
+    const capturedKey = key;
+    const capturedIsOpen = isOpen;
+    const capturedBooking = booking;
+    cell.onclick = () => {
+      if (capturedBooking) {
+        if (confirm(`Annuler la réservation ?`)) {
+          const b = _rdvBookings(); delete b[capturedKey]; _rdvSaveBookings(b);
+          renderRdvTab();
+        }
+      } else {
+        const s = _rdvSlots();
+        if (capturedIsOpen) delete s[capturedKey]; else s[capturedKey] = true;
+        _rdvSaveSlots(s);
+        renderRdvTab();
+      }
+    };
+    grid.appendChild(cell);
+  }
+  if (!anySlot) {
+    const empty = document.createElement('p');
+    empty.className = 'rdv-empty';
+    empty.textContent = 'Aucun créneau ce jour. Touchez un horaire pour l\'ouvrir.';
+    container.appendChild(empty);
+  }
+  container.appendChild(grid);
+  return container;
+}
+
+function _rdvBuildStudentView() {
+  const container = document.createElement('div');
+  container.className = 'rdv-container';
+
+  const title = document.createElement('div');
+  title.className = 'rdv-title';
+  title.innerHTML = '📅 <strong>Rendez-Vous Coaching</strong>';
+  container.appendChild(title);
+
+  container.appendChild(_rdvDayChips(() => {
+    container.innerHTML = '';
+    container.appendChild(title);
+    container.appendChild(_rdvBuildStudentView().children[1]);
+    _renderStudentSlots(container);
+  }));
+
+  _renderStudentSlots(container);
+  return container;
+}
+
+function _renderStudentSlots(container) {
+  const slots = _rdvSlots();
+  const bookings = _rdvBookings();
+  const existing = container.querySelector('.rdv-grid, .rdv-empty');
+  if (existing) existing.remove();
+
+  const openSlots = [];
+  for (let hr = 7; hr <= 21; hr++) {
+    const key = _rdvKey(_rdvDay, hr);
+    if (slots[key]) openSlots.push({ key, hr, booking: bookings[key] || null });
+  }
+
+  if (!openSlots.length) {
+    const empty = document.createElement('p');
+    empty.className = 'rdv-empty';
+    empty.textContent = 'Aucun créneau disponible ce jour.';
+    container.appendChild(empty);
+    return;
+  }
+
+  const grid = document.createElement('div');
+  grid.className = 'rdv-grid';
+  openSlots.forEach(({ key, hr, booking }) => {
+    const isMine = booking && booking.profileId && typeof activeStudentId === 'function' && booking.profileId === activeStudentId();
+    const isBooked = !!booking;
+    const cell = document.createElement('div');
+    cell.className = 'rdv-slot rdv-slot-open' + (isBooked ? ' rdv-slot-booked' : '') + (isMine ? ' rdv-slot-mine' : '');
+    cell.innerHTML = `<span class="rdv-slot-time">${String(hr).padStart(2,'0')}:00</span>
+      <span class="rdv-slot-status">${isMine ? '✅ Votre séance' : isBooked ? 'Réservé' : 'Disponible — Réserver'}</span>`;
+    if (!isBooked) {
+      cell.onclick = () => {
+        const name = typeof myProfile === 'function' && myProfile() ? myProfile().full_name || 'Élève' : 'Élève';
+        const pid  = typeof activeStudentId === 'function' ? activeStudentId() : null;
+        const b = _rdvBookings();
+        b[key] = { name, profileId: pid };
+        _rdvSaveBookings(b);
+        renderRdvTab();
+      };
+    } else if (isMine) {
+      cell.onclick = () => {
+        if (confirm('Annuler votre réservation ?')) {
+          const b = _rdvBookings(); delete b[key]; _rdvSaveBookings(b);
+          renderRdvTab();
+        }
+      };
+    }
+    grid.appendChild(cell);
+  });
+  container.appendChild(grid);
 }
 
 // ============================================================
