@@ -2846,6 +2846,14 @@ body {
   margin: 0 12px;
   width: auto;
 }
+.sdo-bilan-summary--clickable {
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.sdo-bilan-summary--clickable:active {
+  background: rgba(200,255,0,0.07);
+  border-color: rgba(200,255,0,0.5);
+}
 
 /* ============================================================
    RDV TAB

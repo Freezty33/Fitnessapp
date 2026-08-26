@@ -646,7 +646,6 @@ function _renderStudentDayOverview(grid, dayData, wIdx) {
                ${completedCount > 0 ? 'Continuer la séance' : 'Commencer la séance'}
              </button>`
         }
-        ${hasFeedback && !allDone ? `<button class="sdo-cta-secondary" onclick="openBilanOverlay('${fbKey}')">Voir le bilan</button>` : ''}
       </div>
       ` : `
       <div class="sdo-empty">
@@ -655,7 +654,7 @@ function _renderStudentDayOverview(grid, dayData, wIdx) {
       `}
 
       ${hasFeedback ? `
-      <div class="bilan-summary sdo-bilan-summary" id="bilan-summary">
+      <div class="bilan-summary sdo-bilan-summary sdo-bilan-summary--clickable" id="bilan-summary" onclick="openBilanOverlay('${fbKey}')">
         <div class="bilan-summary-header">
           <span class="bilan-summary-title">Bilan de la séance</span>
           <div class="sum-stars">${[1,2,3,4,5].map(n => `<span class="sum-star${n <= fb.rating ? ' lit' : ''}">★</span>`).join('')}</div>
