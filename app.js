@@ -1407,6 +1407,22 @@ function saveWeekField(dayId, exIdx, wIdx, field, el) {
 }
 
 // ============================================================
+async function saveExerciseLog(studentId, log) {
+  if (typeof sb === 'undefined' || !studentId) return;
+  const { error } = await sb.from('exercise_logs').upsert({
+    student_id:    studentId,
+    exercise_name: log.exercise_name,
+    week_number:   log.week_number,
+    logged_date:   log.logged_date,
+    series_done:   log.series_done  || null,
+    reps_done:     log.reps_done    || null,
+    charge_kg:     log.charge_kg    || null,
+    completed:     log.completed    || false,
+    synced_at:     new Date().toISOString(),
+  }, { onConflict: 'student_id,exercise_name,logged_date,week_number' });
+  if (error) console.warn('[sync] exercise_log', error.message);
+}
+
 // REST TIMER (Feature 1)
 // ============================================================
 function setTimerDefault(idx, val) {
