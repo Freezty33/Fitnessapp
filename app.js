@@ -3557,6 +3557,7 @@ function toggleMobilePreview() {
 // Hook called by auth.js coach switcher
 async function onStudentSwitch(studentId) {
   await loadStudentData(studentId);
+  if (typeof currentTab !== 'undefined' && currentTab === 'rdv') renderRdvTab();
 }
 
 async function loadStudentData(studentId) {
@@ -3566,6 +3567,12 @@ async function loadStudentData(studentId) {
 
   // Namespace all localStorage keys under this student's ID
   currentProfileId = studentId;
+
+  // Fetch coach_id for this student (needed by RDV tab)
+  if (typeof sb !== 'undefined') {
+    sb.from('student_profiles').select('coach_id').eq('id', studentId).maybeSingle()
+      .then(({ data }) => { if (data) _currentCoachId = data.coach_id; });
+  }
 
   // Paint immediately from localStorage cache — only reset nav when switching students
   if (switchingStudent) {
@@ -4091,26 +4098,61 @@ function downloadPlanPDF() {
 }
 
 // ============================================================
-// RDV COACHING TAB
+// RDV COACHING TAB — Supabase-backed
 // ============================================================
-const RDV_DAYS  = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-const RDV_STORE = 'rdv_slots';
-const RDV_BOOK  = 'rdv_bookings';
-
-function _rdvKey(day, hour) { return day + '_' + hour; }
-function _rdvSlots()    { try { return JSON.parse(localStorage.getItem(pk(RDV_STORE)) || '{}'); } catch(_) { return {}; } }
-function _rdvBookings() { try { return JSON.parse(localStorage.getItem(pk(RDV_BOOK))  || '{}'); } catch(_) { return {}; } }
-function _rdvSaveSlots(s)    { localStorage.setItem(pk(RDV_STORE), JSON.stringify(s)); }
-function _rdvSaveBookings(b) { localStorage.setItem(pk(RDV_BOOK),  JSON.stringify(b)); }
-
+const RDV_DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 let _rdvDay = RDV_DAYS[0];
+let _currentCoachId = null; // set by loadStudentData when student signs in
+
+// ── Supabase helpers ──────────────────────────────────────────
+
+async function _rdvLoadSlots(coachId) {
+  if (!coachId || typeof sb === 'undefined') return [];
+  const { data } = await sb.from('coach_availability').select('*').eq('coach_id', coachId);
+  return data || [];
+}
+
+async function _rdvLoadBookings(coachId) {
+  if (!coachId || typeof sb === 'undefined') return [];
+  const { data } = await sb
+    .from('rdv_bookings')
+    .select('*, student_profiles(profiles(full_name))')
+    .eq('coach_id', coachId);
+  return data || [];
+}
+
+async function _rdvToggleSlot(coachId, day, hour, currentlyOpen, slotId) {
+  if (currentlyOpen) {
+    await sb.from('coach_availability').delete().eq('id', slotId);
+  } else {
+    await sb.from('coach_availability').insert({ coach_id: coachId, day_label: day, hour });
+  }
+}
+
+async function _rdvBookSlot(coachId, studentId, day, hour) {
+  const { error } = await sb.from('rdv_bookings').insert({
+    coach_id: coachId, student_id: studentId, day_label: day, hour,
+  });
+  if (error && error.code === '23505') throw new Error('Ce créneau vient d\'être réservé. Veuillez en choisir un autre.');
+  if (error) throw new Error(error.message);
+}
+
+async function _rdvCancelBooking(bookingId) {
+  await sb.from('rdv_bookings').delete().eq('id', bookingId);
+}
+
+// ── Entry point ───────────────────────────────────────────────
 
 function renderRdvTab() {
   const root = document.getElementById('rdv-root');
   if (!root) return;
-  root.innerHTML = '';
+  root.innerHTML = '<p style="color:#555;padding:24px;text-align:center">Chargement…</p>';
   const coach = typeof isCoach === 'function' && isCoach();
-  root.appendChild(coach ? _rdvBuildCoachView() : _rdvBuildStudentView());
+  if (coach) {
+    _rdvBuildCoachView().then(el => { root.innerHTML = ''; root.appendChild(el); });
+  } else {
+    _rdvBuildStudentView().then(el => { root.innerHTML = ''; root.appendChild(el); });
+  }
 }
 
 function _rdvDayChips(onSelect) {
@@ -4126,40 +4168,61 @@ function _rdvDayChips(onSelect) {
   return wrap;
 }
 
-function _rdvBuildCoachView() {
+// ── Coach view ────────────────────────────────────────────────
+
+async function _rdvBuildCoachView() {
+  const coachId = typeof myProfile === 'function' && myProfile() ? myProfile().id : null;
   const container = document.createElement('div');
   container.className = 'rdv-container';
 
   const title = document.createElement('div');
   title.className = 'rdv-title';
-  title.innerHTML = '📅 <strong>Rendez-Vous Coaching</strong>';
-  container.appendChild(title);
+  title.innerHTML = '📅 <strong>Rendez-Vous Coaching</strong><br><small style="color:#555;font-size:12px;font-weight:400">Vos disponibilités partagées avec tous vos étudiants</small>';
 
-  const refresh = () => {
+  const refresh = async () => {
     container.innerHTML = '';
     container.appendChild(title);
     container.appendChild(_rdvDayChips(refresh));
-    const slots = _rdvSlots();
-    const bookings = _rdvBookings();
+
+    const [slots, bookings] = await Promise.all([
+      _rdvLoadSlots(coachId),
+      _rdvLoadBookings(coachId),
+    ]);
+
+    const slotMap = {};
+    slots.forEach(s => { slotMap[s.day_label + '_' + s.hour] = s; });
+    const bookMap = {};
+    bookings.forEach(b => { bookMap[b.day_label + '_' + b.hour] = b; });
+
     const grid = document.createElement('div');
     grid.className = 'rdv-grid';
-    for (let h = 7; h <= 21; h++) {
-      const key = _rdvKey(_rdvDay, h);
-      const isOpen = !!slots[key];
-      const booking = bookings[key];
+
+    for (let hr = 7; hr <= 21; hr++) {
+      const key = _rdvDay + '_' + hr;
+      const slot = slotMap[key];
+      const booking = bookMap[key];
+      const isOpen = !!slot;
+
+      let studentName = '';
+      if (booking) {
+        const prof = booking.student_profiles && booking.student_profiles.profiles;
+        studentName = (prof && prof.full_name) ? prof.full_name : 'Étudiant';
+      }
+
       const cell = document.createElement('div');
       cell.className = 'rdv-slot' + (isOpen ? ' rdv-slot-open' : '') + (booking ? ' rdv-slot-booked' : '');
-      cell.innerHTML = `<span class="rdv-slot-time">${String(h).padStart(2,'0')}:00</span>
-        <span class="rdv-slot-status">${booking ? `✅ ${h(booking.name || 'Réservé')}` : isOpen ? 'Disponible' : '+ Ouvrir'}</span>`;
-      cell.onclick = () => {
+      cell.innerHTML = `<span class="rdv-slot-time">${String(hr).padStart(2,'0')}:00</span>
+        <span class="rdv-slot-status">${booking ? '✅ ' + studentName : isOpen ? 'Disponible' : '+ Ouvrir'}</span>`;
+
+      cell.onclick = async () => {
+        cell.style.opacity = '0.5';
+        cell.style.pointerEvents = 'none';
         if (booking) {
-          if (confirm(`Annuler la réservation de ${booking.name || 'ce créneau'} ?`)) {
-            const b = _rdvBookings(); delete b[key]; _rdvSaveBookings(b);
+          if (confirm(`Annuler la réservation de ${studentName} ?`)) {
+            await _rdvCancelBooking(booking.id);
           }
         } else {
-          const s = _rdvSlots();
-          if (isOpen) delete s[key]; else s[key] = true;
-          _rdvSaveSlots(s);
+          await _rdvToggleSlot(coachId, _rdvDay, hr, isOpen, slot && slot.id);
         }
         refresh();
       };
@@ -4168,118 +4231,93 @@ function _rdvBuildCoachView() {
     container.appendChild(grid);
   };
 
-  container.appendChild(_rdvDayChips(refresh));
-  const slotsInit = _rdvSlots();
-  const bookingsInit = _rdvBookings();
-  const grid = document.createElement('div');
-  grid.className = 'rdv-grid';
-  let anySlot = false;
-  for (let hr = 7; hr <= 21; hr++) {
-    const key = _rdvKey(_rdvDay, hr);
-    const isOpen = !!slotsInit[key];
-    const booking = bookingsInit[key];
-    if (isOpen || booking) anySlot = true;
-    const cell = document.createElement('div');
-    cell.className = 'rdv-slot' + (isOpen ? ' rdv-slot-open' : '') + (booking ? ' rdv-slot-booked' : '');
-    cell.innerHTML = `<span class="rdv-slot-time">${String(hr).padStart(2,'0')}:00</span>
-      <span class="rdv-slot-status">${booking ? `✅ ${booking.name || 'Réservé'}` : isOpen ? 'Disponible' : '+ Ouvrir'}</span>`;
-    const capturedKey = key;
-    const capturedIsOpen = isOpen;
-    const capturedBooking = booking;
-    cell.onclick = () => {
-      if (capturedBooking) {
-        if (confirm(`Annuler la réservation ?`)) {
-          const b = _rdvBookings(); delete b[capturedKey]; _rdvSaveBookings(b);
-          renderRdvTab();
-        }
-      } else {
-        const s = _rdvSlots();
-        if (capturedIsOpen) delete s[capturedKey]; else s[capturedKey] = true;
-        _rdvSaveSlots(s);
-        renderRdvTab();
-      }
-    };
-    grid.appendChild(cell);
-  }
-  if (!anySlot) {
-    const empty = document.createElement('p');
-    empty.className = 'rdv-empty';
-    empty.textContent = 'Aucun créneau ce jour. Touchez un horaire pour l\'ouvrir.';
-    container.appendChild(empty);
-  }
-  container.appendChild(grid);
+  await refresh();
   return container;
 }
 
-function _rdvBuildStudentView() {
+// ── Student view ──────────────────────────────────────────────
+
+async function _rdvBuildStudentView() {
+  const studentId = typeof activeStudentId === 'function' ? activeStudentId() : null;
+  const coachId   = _currentCoachId;
   const container = document.createElement('div');
   container.className = 'rdv-container';
 
   const title = document.createElement('div');
   title.className = 'rdv-title';
   title.innerHTML = '📅 <strong>Rendez-Vous Coaching</strong>';
-  container.appendChild(title);
 
-  container.appendChild(_rdvDayChips(() => {
+  const refresh = async () => {
     container.innerHTML = '';
     container.appendChild(title);
-    container.appendChild(_rdvBuildStudentView().children[1]);
-    _renderStudentSlots(container);
-  }));
+    container.appendChild(_rdvDayChips(refresh));
 
-  _renderStudentSlots(container);
-  return container;
-}
-
-function _renderStudentSlots(container) {
-  const slots = _rdvSlots();
-  const bookings = _rdvBookings();
-  const existing = container.querySelector('.rdv-grid, .rdv-empty');
-  if (existing) existing.remove();
-
-  const openSlots = [];
-  for (let hr = 7; hr <= 21; hr++) {
-    const key = _rdvKey(_rdvDay, hr);
-    if (slots[key]) openSlots.push({ key, hr, booking: bookings[key] || null });
-  }
-
-  if (!openSlots.length) {
-    const empty = document.createElement('p');
-    empty.className = 'rdv-empty';
-    empty.textContent = 'Aucun créneau disponible ce jour.';
-    container.appendChild(empty);
-    return;
-  }
-
-  const grid = document.createElement('div');
-  grid.className = 'rdv-grid';
-  openSlots.forEach(({ key, hr, booking }) => {
-    const isMine = booking && booking.profileId && typeof activeStudentId === 'function' && booking.profileId === activeStudentId();
-    const isBooked = !!booking;
-    const cell = document.createElement('div');
-    cell.className = 'rdv-slot rdv-slot-open' + (isBooked ? ' rdv-slot-booked' : '') + (isMine ? ' rdv-slot-mine' : '');
-    cell.innerHTML = `<span class="rdv-slot-time">${String(hr).padStart(2,'0')}:00</span>
-      <span class="rdv-slot-status">${isMine ? '✅ Votre séance' : isBooked ? 'Réservé' : 'Disponible — Réserver'}</span>`;
-    if (!isBooked) {
-      cell.onclick = () => {
-        const name = typeof myProfile === 'function' && myProfile() ? myProfile().full_name || 'Élève' : 'Élève';
-        const pid  = typeof activeStudentId === 'function' ? activeStudentId() : null;
-        const b = _rdvBookings();
-        b[key] = { name, profileId: pid };
-        _rdvSaveBookings(b);
-        renderRdvTab();
-      };
-    } else if (isMine) {
-      cell.onclick = () => {
-        if (confirm('Annuler votre réservation ?')) {
-          const b = _rdvBookings(); delete b[key]; _rdvSaveBookings(b);
-          renderRdvTab();
-        }
-      };
+    if (!coachId) {
+      const msg = document.createElement('p');
+      msg.className = 'rdv-empty';
+      msg.textContent = 'Impossible de charger les créneaux (coach non identifié).';
+      container.appendChild(msg);
+      return;
     }
-    grid.appendChild(cell);
-  });
-  container.appendChild(grid);
+
+    const [slots, bookings] = await Promise.all([
+      _rdvLoadSlots(coachId),
+      _rdvLoadBookings(coachId),
+    ]);
+
+    const openSlots = slots.filter(s => s.day_label === _rdvDay);
+    const bookMap = {};
+    bookings.forEach(b => { bookMap[b.day_label + '_' + b.hour] = b; });
+
+    if (!openSlots.length) {
+      const empty = document.createElement('p');
+      empty.className = 'rdv-empty';
+      empty.textContent = 'Aucun créneau disponible ce jour.';
+      container.appendChild(empty);
+      return;
+    }
+
+    openSlots.sort((a, b) => a.hour - b.hour);
+    const grid = document.createElement('div');
+    grid.className = 'rdv-grid';
+
+    openSlots.forEach(slot => {
+      const key = slot.day_label + '_' + slot.hour;
+      const booking = bookMap[key] || null;
+      const isMine  = booking && booking.student_id === studentId;
+      const isBooked = !!booking;
+
+      const cell = document.createElement('div');
+      cell.className = 'rdv-slot rdv-slot-open' + (isBooked ? ' rdv-slot-booked' : '') + (isMine ? ' rdv-slot-mine' : '');
+      cell.innerHTML = `<span class="rdv-slot-time">${String(slot.hour).padStart(2,'0')}:00</span>
+        <span class="rdv-slot-status">${isMine ? '✅ Votre séance' : isBooked ? 'Réservé' : 'Disponible — Réserver'}</span>`;
+
+      if (!isBooked) {
+        cell.onclick = async () => {
+          cell.style.opacity = '0.5';
+          cell.style.pointerEvents = 'none';
+          try {
+            await _rdvBookSlot(coachId, studentId, slot.day_label, slot.hour);
+          } catch (e) {
+            alert(e.message);
+          }
+          refresh();
+        };
+      } else if (isMine) {
+        cell.onclick = async () => {
+          if (confirm('Annuler votre réservation ?')) {
+            await _rdvCancelBooking(booking.id);
+            refresh();
+          }
+        };
+      }
+      grid.appendChild(cell);
+    });
+    container.appendChild(grid);
+  };
+
+  await refresh();
+  return container;
 }
 
 // ============================================================
