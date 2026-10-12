@@ -4106,6 +4106,20 @@ let _currentCoachId = null; // set by loadStudentData when student signs in
 
 // ── Supabase helpers ──────────────────────────────────────────
 
+async function _rdvOpenDefaultWeek(coachId) {
+  const rows = [];
+  RDV_DAYS.forEach(day => {
+    for (let hr = 8; hr <= 20; hr++) {
+      rows.push({ coach_id: coachId, day_label: day, hour: hr });
+    }
+  });
+  await sb.from('coach_availability').upsert(rows, { onConflict: 'coach_id,day_label,hour' });
+}
+
+async function _rdvCloseDay(coachId, day) {
+  await sb.from('coach_availability').delete().eq('coach_id', coachId).eq('day_label', day);
+}
+
 async function _rdvLoadSlots(coachId) {
   if (!coachId || typeof sb === 'undefined') return [];
   const { data } = await sb.from('coach_availability').select('*').eq('coach_id', coachId);
@@ -4177,17 +4191,53 @@ async function _rdvBuildCoachView() {
 
   const title = document.createElement('div');
   title.className = 'rdv-title';
-  title.innerHTML = '📅 <strong>Rendez-Vous Coaching</strong><br><small style="color:#555;font-size:12px;font-weight:400">Vos disponibilités partagées avec tous vos étudiants</small>';
+  title.innerHTML = '📅 <strong>Rendez-Vous Coaching</strong>';
 
   const refresh = async () => {
     container.innerHTML = '';
     container.appendChild(title);
-    container.appendChild(_rdvDayChips(refresh));
+
+    // Action bar: open full week + booking count
+    const actionBar = document.createElement('div');
+    actionBar.style.cssText = 'display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;';
+
+    const btnOpenWeek = document.createElement('button');
+    btnOpenWeek.className = 'btn-secondary';
+    btnOpenWeek.style.cssText = 'font-size:13px;padding:8px 14px;';
+    btnOpenWeek.textContent = '🗓 Ouvrir toute la semaine (8h–20h)';
+    btnOpenWeek.onclick = async () => {
+      btnOpenWeek.disabled = true;
+      btnOpenWeek.textContent = 'Ouverture…';
+      await _rdvOpenDefaultWeek(coachId);
+      refresh();
+    };
+    actionBar.appendChild(btnOpenWeek);
 
     const [slots, bookings] = await Promise.all([
       _rdvLoadSlots(coachId),
       _rdvLoadBookings(coachId),
     ]);
+
+    const countBadge = document.createElement('span');
+    countBadge.style.cssText = 'color:#8A7F6E;font-size:12px;';
+    countBadge.textContent = `${bookings.length} réservation${bookings.length !== 1 ? 's' : ''} cette semaine`;
+    actionBar.appendChild(countBadge);
+    container.appendChild(actionBar);
+
+    container.appendChild(_rdvDayChips(refresh));
+
+    // "Close day" button
+    const btnCloseDay = document.createElement('button');
+    btnCloseDay.className = 'btn-secondary';
+    btnCloseDay.style.cssText = 'font-size:12px;padding:6px 12px;margin-bottom:12px;color:#FF5050;border-color:rgba(255,80,80,0.4);';
+    btnCloseDay.textContent = `Fermer tous les créneaux — ${_rdvDay}`;
+    btnCloseDay.onclick = async () => {
+      if (confirm(`Fermer tous les créneaux du ${_rdvDay} ?`)) {
+        await _rdvCloseDay(coachId, _rdvDay);
+        refresh();
+      }
+    };
+    container.appendChild(btnCloseDay);
 
     const slotMap = {};
     slots.forEach(s => { slotMap[s.day_label + '_' + s.hour] = s; });
@@ -4197,7 +4247,7 @@ async function _rdvBuildCoachView() {
     const grid = document.createElement('div');
     grid.className = 'rdv-grid';
 
-    for (let hr = 7; hr <= 21; hr++) {
+    for (let hr = 8; hr <= 20; hr++) {
       const key = _rdvDay + '_' + hr;
       const slot = slotMap[key];
       const booking = bookMap[key];
@@ -4209,10 +4259,13 @@ async function _rdvBuildCoachView() {
         studentName = (prof && prof.full_name) ? prof.full_name : 'Étudiant';
       }
 
+      const hrEnd = hr + 1;
+      const timeLabel = `${String(hr).padStart(2,'0')}:00 → ${String(hrEnd).padStart(2,'0')}:00`;
+
       const cell = document.createElement('div');
       cell.className = 'rdv-slot' + (isOpen ? ' rdv-slot-open' : '') + (booking ? ' rdv-slot-booked' : '');
-      cell.innerHTML = `<span class="rdv-slot-time">${String(hr).padStart(2,'0')}:00</span>
-        <span class="rdv-slot-status">${booking ? '✅ ' + studentName : isOpen ? 'Disponible' : '+ Ouvrir'}</span>`;
+      cell.innerHTML = `<span class="rdv-slot-time">${timeLabel}</span>
+        <span class="rdv-slot-status">${booking ? '👤 ' + studentName : isOpen ? 'Disponible' : '+ Ouvrir'}</span>`;
 
       cell.onclick = async () => {
         cell.style.opacity = '0.5';
@@ -4287,10 +4340,17 @@ async function _rdvBuildStudentView() {
       const isMine  = booking && booking.student_id === studentId;
       const isBooked = !!booking;
 
+      const hrEnd = slot.hour + 1;
+      const timeLabel = `${String(slot.hour).padStart(2,'0')}:00 → ${String(hrEnd).padStart(2,'0')}:00`;
+
+      let slotClass = 'rdv-slot rdv-slot-open';
+      if (isMine) slotClass += ' rdv-slot-mine';
+      else if (isBooked) slotClass += ' rdv-slot-unavailable';
+
       const cell = document.createElement('div');
-      cell.className = 'rdv-slot rdv-slot-open' + (isBooked ? ' rdv-slot-booked' : '') + (isMine ? ' rdv-slot-mine' : '');
-      cell.innerHTML = `<span class="rdv-slot-time">${String(slot.hour).padStart(2,'0')}:00</span>
-        <span class="rdv-slot-status">${isMine ? '✅ Votre séance' : isBooked ? 'Réservé' : 'Disponible — Réserver'}</span>`;
+      cell.className = slotClass;
+      cell.innerHTML = `<span class="rdv-slot-time">${timeLabel}</span>
+        <span class="rdv-slot-status">${isMine ? '✅ Votre séance' : isBooked ? '🔒 Indisponible' : 'Disponible — Réserver'}</span>`;
 
       if (!isBooked) {
         cell.onclick = async () => {
