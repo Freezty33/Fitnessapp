@@ -1,4 +1,4 @@
-const CACHE   = 'maxfit-v7';
+const CACHE   = 'maxfit-v8';
 const OFFLINE = '/offline.html';
 
 const PRECACHE = [
