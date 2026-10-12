@@ -3085,23 +3085,55 @@ body {
   color: var(--muted);
 }
 
+/* Slot disponible (coach + étudiant) */
 .rdv-slot-open {
-  border-color: rgba(200,255,0,0.3);
+  border-color: rgba(200,255,0,0.55);
+  background: rgba(200,255,0,0.06);
 }
-
 .rdv-slot-open .rdv-slot-status {
   color: var(--accent);
   font-weight: 600;
 }
 
+/* Slot réservé — vue COACH (amber/orange pour voir avec qui il a RDV) */
 .rdv-slot-booked {
-  border-color: rgba(200,255,0,0.6);
-  background: rgba(200,255,0,0.06);
+  border-color: rgba(255,165,0,0.75);
+  background: rgba(255,140,0,0.09);
+  cursor: default;
+}
+.rdv-slot-booked .rdv-slot-status {
+  color: #FFA500;
+  font-weight: 700;
+  font-size: 14px;
+}
+.rdv-slot-booked .rdv-slot-time {
+  color: #FFA500;
 }
 
-.rdv-slot-booked .rdv-slot-status { color: var(--text); }
+/* Slot pris par quelqu'un d'autre — vue ÉTUDIANT (rouge = indisponible) */
+.rdv-slot-unavailable {
+  border-color: rgba(255,80,80,0.55);
+  background: rgba(255,80,80,0.07);
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+.rdv-slot-unavailable .rdv-slot-status {
+  color: #FF5050;
+  font-weight: 600;
+}
+.rdv-slot-unavailable .rdv-slot-time {
+  color: #FF5050;
+}
 
+/* Mon slot — vue ÉTUDIANT (vert fort = ma réservation confirmée) */
 .rdv-slot-mine {
   border-color: var(--accent);
-  background: rgba(200,255,0,0.1);
+  background: rgba(200,255,0,0.14);
+}
+.rdv-slot-mine .rdv-slot-status {
+  color: var(--accent);
+  font-weight: 700;
+}
+.rdv-slot-mine .rdv-slot-time {
+  color: var(--accent);
 }
