@@ -4130,7 +4130,7 @@ async function _rdvLoadBookings(coachId) {
   if (!coachId || typeof sb === 'undefined') return [];
   const { data } = await sb
     .from('rdv_bookings')
-    .select('*, student_profiles(profiles(full_name))')
+    .select('*, student_profiles(profiles!student_profiles_user_id_fkey(full_name))')
     .eq('coach_id', coachId);
   return data || [];
 }
