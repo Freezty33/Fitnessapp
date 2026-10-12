@@ -361,10 +361,10 @@ function _buildLoginScreen() {
 
   const title = document.createElement('h1');
   title.style.cssText = 'color:#C8FF00;font-size:32px;font-weight:900;letter-spacing:-1px;margin-bottom:8px';
-  title.textContent = 'LOUIS';
+  title.textContent = 'MAX';
   const span = document.createElement('span');
   span.style.color = '#fff';
-  span.textContent = 'FIT';
+  span.textContent = ' FIT';
   title.appendChild(span);
 
   const sub = document.createElement('p');
