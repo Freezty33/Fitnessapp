@@ -4295,8 +4295,6 @@ async function _rdvBuildCoachView() {
 // ── Student view ──────────────────────────────────────────────
 
 async function _rdvBuildStudentView() {
-  const studentId = typeof activeStudentId === 'function' ? activeStudentId() : null;
-  const coachId   = _currentCoachId;
   const container = document.createElement('div');
   container.className = 'rdv-container';
 
@@ -4305,6 +4303,10 @@ async function _rdvBuildStudentView() {
   title.innerHTML = '📅 <strong>Rendez-Vous Coaching</strong>';
 
   const refresh = async () => {
+    // Read dynamically each refresh to avoid stale closure if view built before auth completed
+    const studentId = typeof activeStudentId === 'function' ? activeStudentId() : null;
+    const coachId   = _currentCoachId;
+
     container.innerHTML = '';
     container.appendChild(title);
     container.appendChild(_rdvDayChips(refresh));
