@@ -53,15 +53,19 @@ async function _fetchProfile(uid) {
 function _showSignOutButton() {
   const btn  = document.getElementById('btn-signout');
   const btnM = document.getElementById('btn-signout-mobile');
-  if (btn)  btn.style.display  = '';
-  if (btnM) btnM.style.display = '';
+  const btnM2 = document.getElementById('mobile-logout-btn');
+  if (btn)   btn.style.display   = '';
+  if (btnM)  btnM.style.display  = '';
+  if (btnM2) btnM2.style.display = '';
 }
 
 function _hideSignOutButton() {
   const btn  = document.getElementById('btn-signout');
   const btnM = document.getElementById('btn-signout-mobile');
-  if (btn)  btn.style.display  = 'none';
-  if (btnM) btnM.style.display = 'none';
+  const btnM2 = document.getElementById('mobile-logout-btn');
+  if (btn)   btn.style.display   = 'none';
+  if (btnM)  btnM.style.display  = 'none';
+  if (btnM2) btnM2.style.display = 'none';
 }
 
 // ── Coach student switcher ────────────────────────────────────
