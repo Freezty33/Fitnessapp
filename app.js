@@ -4262,8 +4262,12 @@ async function _rdvBuildCoachView() {
       const hrEnd = hr + 1;
       const timeLabel = `${String(hr).padStart(2,'0')}:00 → ${String(hrEnd).padStart(2,'0')}:00`;
 
+      let coachSlotClass = 'rdv-slot';
+      if (booking) coachSlotClass += ' rdv-slot-booked';
+      else if (isOpen) coachSlotClass += ' rdv-slot-open';
+
       const cell = document.createElement('div');
-      cell.className = 'rdv-slot' + (isOpen ? ' rdv-slot-open' : '') + (booking ? ' rdv-slot-booked' : '');
+      cell.className = coachSlotClass;
       cell.innerHTML = `<span class="rdv-slot-time">${timeLabel}</span>
         <span class="rdv-slot-status">${booking ? '👤 ' + studentName : isOpen ? 'Disponible' : '+ Ouvrir'}</span>`;
 
@@ -4343,9 +4347,10 @@ async function _rdvBuildStudentView() {
       const hrEnd = slot.hour + 1;
       const timeLabel = `${String(slot.hour).padStart(2,'0')}:00 → ${String(hrEnd).padStart(2,'0')}:00`;
 
-      let slotClass = 'rdv-slot rdv-slot-open';
+      let slotClass = 'rdv-slot';
       if (isMine) slotClass += ' rdv-slot-mine';
       else if (isBooked) slotClass += ' rdv-slot-unavailable';
+      else slotClass += ' rdv-slot-open';
 
       const cell = document.createElement('div');
       cell.className = slotClass;
