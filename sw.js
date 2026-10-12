@@ -1,4 +1,4 @@
-const CACHE   = 'maxfit-v1';
+const CACHE   = 'maxfit-v2';
 const OFFLINE = '/offline.html';
 
 const PRECACHE = [
@@ -11,7 +11,7 @@ const PRECACHE = [
   '/offline-sync.js',
   '/offline.html',
   '/chart.min.js',
-  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js'
+  '/supabase.js',
 ];
 
 self.addEventListener('install', e => {
