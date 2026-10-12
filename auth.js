@@ -391,11 +391,121 @@ function _buildLoginScreen() {
   form.appendChild(emailIn);
   form.appendChild(pwdIn);
   form.appendChild(btn);
+
+  // Install guide separator
+  const sep = document.createElement('p');
+  sep.style.cssText = 'color:#333;font-size:11px;margin:20px 0 8px;text-align:center;letter-spacing:.8px';
+  sep.textContent = 'INSTALLER L\'APPLICATION';
+
+  const btnIos = document.createElement('button');
+  btnIos.style.cssText = 'width:100%;padding:11px;background:transparent;border:1px solid #2a2a2a;border-radius:10px;color:#888;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:border-color .2s';
+  btnIos.innerHTML = '<span style="font-size:15px">🍎</span> Installer sur iPhone (iOS)';
+  btnIos.addEventListener('mouseover', () => btnIos.style.borderColor = '#C8FF00');
+  btnIos.addEventListener('mouseout',  () => btnIos.style.borderColor = '#2a2a2a');
+  btnIos.addEventListener('click', () => _showInstallGuide('ios'));
+
+  const btnAndroid = document.createElement('button');
+  btnAndroid.style.cssText = 'width:100%;padding:11px;background:transparent;border:1px solid #2a2a2a;border-radius:10px;color:#888;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:border-color .2s';
+  btnAndroid.innerHTML = '<span style="font-size:15px">🤖</span> Installer sur Android';
+  btnAndroid.addEventListener('mouseover', () => btnAndroid.style.borderColor = '#C8FF00');
+  btnAndroid.addEventListener('mouseout',  () => btnAndroid.style.borderColor = '#2a2a2a');
+  btnAndroid.addEventListener('click', () => _showInstallGuide('android'));
+
+  form.appendChild(sep);
+  form.appendChild(btnIos);
+  form.appendChild(btnAndroid);
+
   scr.appendChild(title);
   scr.appendChild(sub);
   scr.appendChild(form);
   document.body.appendChild(scr);
   return scr;
+}
+
+function _showInstallGuide(platform) {
+  const existing = document.getElementById('install-guide-overlay');
+  if (existing) existing.remove();
+
+  const isIos = platform === 'ios';
+
+  const steps = isIos ? [
+    { icon: '🌐', title: 'Ouvre Safari',              desc: 'L\'installation ne fonctionne qu\'avec Safari. Pas Chrome ni Firefox.' },
+    { icon: '🔗', title: 'Va sur le site',             desc: 'Tape maxfitness33.netlify.app dans la barre d\'adresse Safari.' },
+    { icon: '📤', title: 'Appuie sur Partager',        desc: 'L\'icône carré avec une flèche ↑ en bas de l\'écran Safari.' },
+    { icon: '📲', title: '"Sur l\'écran d\'accueil"',  desc: 'Fais défiler la liste des options et appuie dessus.' },
+    { icon: '✅', title: 'Appuie sur "Ajouter"',       desc: 'L\'icône Max Fit apparaît sur ton écran d\'accueil !' },
+  ] : [
+    { icon: '🌐', title: 'Ouvre Chrome',               desc: 'L\'installation fonctionne avec Chrome ou Edge.' },
+    { icon: '🔗', title: 'Va sur le site',             desc: 'Tape maxfitness33.netlify.app dans la barre d\'adresse.' },
+    { icon: '⋮',  title: 'Menu → "Ajouter à l\'écran"', desc: 'Appuie sur les 3 points ⋮ en haut à droite, puis "Ajouter à l\'écran d\'accueil".' },
+    { icon: '📲', title: 'Confirme',                   desc: 'Appuie sur "Ajouter" dans la fenêtre qui apparaît.' },
+    { icon: '✅', title: 'C\'est installé !',           desc: 'L\'icône Max Fit apparaît sur ton écran d\'accueil !' },
+  ];
+
+  const overlay = document.createElement('div');
+  overlay.id = 'install-guide-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,0.85);backdrop-filter:blur(6px)';
+
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#111;border:1px solid #222;border-radius:20px;padding:28px 24px 24px;width:100%;max-width:340px;max-height:80vh;overflow-y:auto;position:relative';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕';
+  closeBtn.style.cssText = 'position:absolute;top:16px;right:16px;background:#1a1a1a;border:1px solid #333;color:#666;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center';
+  closeBtn.addEventListener('click', () => overlay.remove());
+
+  const h2 = document.createElement('h2');
+  h2.style.cssText = 'color:#C8FF00;font-size:18px;font-weight:900;margin:0 0 4px;padding-right:36px';
+  h2.textContent = isIos ? 'Installer sur iPhone' : 'Installer sur Android';
+
+  const subtitle = document.createElement('p');
+  subtitle.style.cssText = 'color:#555;font-size:12px;margin:0 0 24px';
+  subtitle.textContent = isIos ? 'Via Safari — Ajouter à l\'écran d\'accueil' : 'Via Chrome — Ajouter à l\'écran d\'accueil';
+
+  const stepsWrap = document.createElement('div');
+  stepsWrap.style.cssText = 'display:flex;flex-direction:column;gap:16px;margin-bottom:24px';
+
+  steps.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:flex-start;gap:14px';
+
+    const num = document.createElement('div');
+    num.style.cssText = 'min-width:28px;height:28px;background:#C8FF00;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:#000;flex-shrink:0;margin-top:1px';
+    num.textContent = i + 1;
+
+    const iconEl = document.createElement('div');
+    iconEl.style.cssText = 'font-size:20px;line-height:28px;flex-shrink:0';
+    iconEl.textContent = s.icon;
+
+    const text = document.createElement('div');
+    const tTitle = document.createElement('p');
+    tTitle.style.cssText = 'color:#fff;font-size:13px;font-weight:700;margin:0 0 2px;line-height:1.4';
+    tTitle.textContent = s.title;
+    const tDesc = document.createElement('p');
+    tDesc.style.cssText = 'color:#777;font-size:12px;margin:0;line-height:1.5';
+    tDesc.textContent = s.desc;
+    text.appendChild(tTitle);
+    text.appendChild(tDesc);
+
+    row.appendChild(num);
+    row.appendChild(iconEl);
+    row.appendChild(text);
+    stepsWrap.appendChild(row);
+  });
+
+  const doneBtn = document.createElement('button');
+  doneBtn.textContent = 'Compris !';
+  doneBtn.style.cssText = 'width:100%;padding:13px;background:#C8FF00;color:#000;font-weight:800;border:none;border-radius:10px;font-size:14px;cursor:pointer;letter-spacing:.3px';
+  doneBtn.addEventListener('click', () => overlay.remove());
+
+  box.appendChild(closeBtn);
+  box.appendChild(h2);
+  box.appendChild(subtitle);
+  box.appendChild(stepsWrap);
+  box.appendChild(doneBtn);
+  overlay.appendChild(box);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
 }
 
 function hideLoginScreen() {
