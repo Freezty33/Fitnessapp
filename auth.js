@@ -3,6 +3,8 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
+const FUNCTIONS_BASE = 'https://maxfitness33.netlify.app';
+
 let _viewingStudentId = null;
 let _myProfile        = null;
 
@@ -187,7 +189,7 @@ function _confirmDeleteStudent() {
 async function _doDeleteStudent(studentProfileId, name) {
   try {
     const { data: { session } } = await sb.auth.getSession();
-    const res = await fetch('/.netlify/functions/delete-student', {
+    const res = await fetch(`${FUNCTIONS_BASE}/.netlify/functions/delete-student`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
       body: JSON.stringify({ student_profile_id: studentProfileId }),
@@ -276,7 +278,7 @@ function _showCreateStudentModal() {
 
     try {
       const { data: { session } } = await sb.auth.getSession();
-      const res = await fetch('/.netlify/functions/create-student', {
+      const res = await fetch(`${FUNCTIONS_BASE}/.netlify/functions/create-student`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
         body: JSON.stringify({ email, password: pass, full_name: name, goal_text: goal }),
