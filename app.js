@@ -2643,7 +2643,8 @@ function _buildExerciseProgress() {
       (ex.weeks || []).forEach((w, i) => {
         if (i < weekCount) {
           const v = parseFloat(w.charge);
-          if (!isNaN(v) && v > 0) map[ex.name][i] = v;
+          const isDone = w.done && String(w.done).trim() !== '' && String(w.done).trim() !== '—';
+          if (!isNaN(v) && v > 0 && isDone) map[ex.name][i] = v;
         }
       });
     });
