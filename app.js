@@ -1908,10 +1908,7 @@ async function _loadVoiceFromSupabase(studentId) {
   const { data: rows } = await sb.from('coach_voice_notes').select('voice_key, public_url').eq('student_id', studentId);
   if (!rows || !rows.length) return;
   rows.forEach(row => {
-    // Only set if not already in localStorage (local is authoritative on this device)
-    if (!savedVoice[row.voice_key]) {
-      savedVoice[row.voice_key] = row.public_url;
-    }
+    savedVoice[row.voice_key] = row.public_url;
   });
   localStorage.setItem(pk('voice'), JSON.stringify(savedVoice));
 }
