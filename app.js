@@ -1886,7 +1886,9 @@ async function _uploadVoiceToSupabase(blob, mime, voiceKey) {
   if (typeof sb === 'undefined' || typeof activeStudentId !== 'function' || !activeStudentId()) return;
   const studentId = activeStudentId();
   const ext = mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm';
-  const path = `${studentId}/${voiceKey}.${ext}`;
+  // Supabase Storage rejects accented chars and spaces — sanitize path only, keep voiceKey intact for DB lookup
+  const safeKey = voiceKey.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const path = `${studentId}/${safeKey}.${ext}`;
   const { error: upErr } = await sb.storage.from('voice-notes').upload(path, blob, { upsert: true, contentType: mime });
   if (upErr) { console.warn('[voice upload]', upErr.message); return; }
   const { data: { publicUrl } } = sb.storage.from('voice-notes').getPublicUrl(path);
