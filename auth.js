@@ -357,15 +357,18 @@ function _setupStudentSync(studentId) {
     sb.removeChannel(_realtimeChannel);
     _realtimeChannel = null;
   }
-  _realtimeChannel = sb.channel('student-plan-' + studentId)
-    .on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'workout_plans',
-      filter: `student_id=eq.${studentId}`
-    }, () => {
-      if (typeof loadStudentData === 'function') loadStudentData(studentId);
-    })
+  _realtimeChannel = sb.channel('student-sync-' + studentId)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'workout_plans',
+        filter: `student_id=eq.${studentId}` },
+      () => { if (typeof loadStudentData === 'function') loadStudentData(studentId); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'coach_voice_notes',
+        filter: `student_id=eq.${studentId}` },
+      () => { if (typeof loadStudentData === 'function') loadStudentData(studentId); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'coach_availability' },
+      () => { if (typeof renderRdvTab === 'function' && typeof currentTab !== 'undefined' && currentTab === 'rdv') renderRdvTab(); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'rdv_bookings',
+        filter: `student_id=eq.${studentId}` },
+      () => { if (typeof renderRdvTab === 'function' && typeof currentTab !== 'undefined' && currentTab === 'rdv') renderRdvTab(); })
     .subscribe();
 }
 
