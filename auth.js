@@ -5,8 +5,9 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 const FUNCTIONS_BASE = 'https://maxfitness33.netlify.app';
 
-let _viewingStudentId = null;
-let _myProfile        = null;
+let _viewingStudentId  = null;
+let _myProfile         = null;
+let _realtimeChannel   = null;
 
 function activeStudentId() { return _viewingStudentId; }
 function myProfile()       { return _myProfile; }
@@ -39,6 +40,7 @@ async function _onSignedIn(uid) {
     _viewingStudentId = data ? data.id : null;
     if (_viewingStudentId && typeof loadStudentData === 'function') {
       await loadStudentData(_viewingStudentId);
+      _setupStudentSync(_viewingStudentId);
     }
   }
   hideLoginScreen();
@@ -345,7 +347,44 @@ async function signIn(email, password) {
   }
 }
 
+// ── Student real-time sync (Option A: visibilitychange + Option B: Realtime) ──
+function _setupStudentSync(studentId) {
+  // Option A — refresh silently when student returns to the app (background → foreground)
+  document.addEventListener('visibilitychange', _onVisibilityChange);
+
+  // Option B — Supabase Realtime: push update when coach saves the workout plan
+  if (_realtimeChannel) {
+    sb.removeChannel(_realtimeChannel);
+    _realtimeChannel = null;
+  }
+  _realtimeChannel = sb.channel('student-plan-' + studentId)
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'workout_plans',
+      filter: `student_id=eq.${studentId}`
+    }, () => {
+      if (typeof loadStudentData === 'function') loadStudentData(studentId);
+    })
+    .subscribe();
+}
+
+function _onVisibilityChange() {
+  if (document.visibilityState !== 'visible') return;
+  if (!_viewingStudentId || isCoach()) return;
+  if (typeof loadStudentData === 'function') loadStudentData(_viewingStudentId);
+}
+
+function _teardownStudentSync() {
+  document.removeEventListener('visibilitychange', _onVisibilityChange);
+  if (_realtimeChannel) {
+    sb.removeChannel(_realtimeChannel);
+    _realtimeChannel = null;
+  }
+}
+
 async function signOut() {
+  _teardownStudentSync();
   await sb.auth.signOut();
 }
 
