@@ -753,14 +753,6 @@ body {
 /* ============================================================
    GRAPHS
    ============================================================ */
-.graphs-container {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 28px 28px 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 18px;
-}
 .graph-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -769,23 +761,6 @@ body {
 }
 .graph-card h3 { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
 .graph-card.full-width { grid-column: 1 / -1; }
-
-.data-entry-section { max-width: 1280px; margin: 28px auto 0; padding: 0 28px; }
-.data-entry-section h2 { font-size: 18px; font-weight: 800; color: #fff; margin-bottom: 14px; }
-.data-form {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-  display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;
-}
-.data-form label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
-.data-form input {
-  background: var(--surface); border: 1px solid var(--border); color: #fff;
-  padding: 9px 12px; border-radius: var(--radius-sm); font-size: 14px; width: 110px;
-  outline: none; transition: border-color 0.2s;
-}
-.data-form input:focus { border-color: var(--accent); }
 
 .exercise-progress-section { max-width: 1280px; margin: 28px auto 60px; padding: 0 28px; }
 .exercise-progress-section h2 { font-size: 18px; font-weight: 800; color: #fff; margin-bottom: 14px; }
@@ -1180,8 +1155,6 @@ body {
 
   /* Training grid */
   .training-grid { padding: 28px 16px 48px; }
-  .graphs-container { padding: 20px 16px 0; }
-  .data-entry-section,
   .exercise-progress-section,
   .volume-section,
   .bilan-history-wrap,
@@ -1192,10 +1165,6 @@ body {
 
   /* Exercise card metrics — 2 columns */
   .ex-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-
-  /* Data form — wrap tightly */
-  .data-form { gap: 10px; }
-  .data-form input { width: 90px; }
 
   /* Exercise select */
   .exercise-selector select { min-width: 100%; width: 100%; }
@@ -1293,15 +1262,10 @@ body {
   .metric-val { font-size: 14px; }
 
   /* Graphs */
-  .graphs-container { grid-template-columns: 1fr; padding: 14px 12px 0; }
-  .data-entry-section,
   .exercise-progress-section,
   .volume-section,
   .bilan-history-wrap,
   .supplements-section { padding: 0 12px; margin: 28px auto; }
-  .data-form { flex-direction: column; align-items: stretch; }
-  .data-form label { flex-direction: row; align-items: center; justify-content: space-between; }
-  .data-form input { width: 120px; }
   .exercise-selector select { min-width: 100%; }
 
   /* Nutrition */
