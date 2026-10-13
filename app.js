@@ -346,15 +346,21 @@ function openPlanOverlay() {
         const wd = ex.weeks && ex.weeks[wIdx];
         return wd && String(wd.done || '').trim();
       }).length;
-      const isActive  = d === currentDay && w === currentWeek;
+      const isActive    = d === currentDay && w === currentWeek;
+      const isCompleted = exCount > 0 && doneCount === exCount;
 
       const card = document.createElement('button');
-      card.className = 'plan-day-card' + (isActive ? ' plan-day-card--active' : '');
+      card.className = 'plan-day-card'
+        + (isActive    ? ' plan-day-card--active'    : '')
+        + (isCompleted ? ' plan-day-card--completed' : '');
+      const dayIconHtml = isCompleted
+        ? `<svg class="plan-day-icon plan-day-icon--done" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20,6 9,17 4,12"/></svg>`
+        : `<svg class="plan-day-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 4v16M18 4v16M6 9h12M6 15h12"/></svg>`;
       card.innerHTML = `
-        <svg class="plan-day-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 4v16M18 4v16M6 9h12M6 15h12"/></svg>
+        ${dayIconHtml}
         <span class="plan-day-sub">Jour ${d}</span>
         <span class="plan-day-name">${h(label)}</span>
-        <span class="plan-day-meta">${exCount} exercice${exCount !== 1 ? 's' : ''}${doneCount > 0 ? ` · ${doneCount}✓` : ''}</span>`;
+        <span class="plan-day-meta">${isCompleted ? `✓ Complété` : `${exCount} exercice${exCount !== 1 ? 's' : ''}${doneCount > 0 ? ` · ${doneCount}✓` : ''}`}</span>`;
       card.addEventListener('click', () => {
         currentDay  = d;
         currentWeek = w;
