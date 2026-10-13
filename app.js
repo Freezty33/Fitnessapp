@@ -1650,6 +1650,9 @@ function _renderSeanceFooter(fbKey) {
 
 function openBilanOverlay(fbKey) {
   if (document.getElementById('bilan-overlay')) return;
+  // Cleanup voice notes for this day when student opens the bilan (day complete signal)
+  const _bilanDay = parseInt(fbKey.split('_')[0]);
+  _cleanupDayVoiceNotes(_bilanDay);
   // Anchor fb in workoutFeedback immediately so all mutations (rating, pain, note) share the same object
   if (!workoutFeedback[fbKey]) workoutFeedback[fbKey] = { rating: 0, note: '', pain: [] };
   const fb = workoutFeedback[fbKey];
@@ -1907,6 +1910,19 @@ async function _deleteVoiceFromSupabase(voiceKey) {
     .select('storage_path').eq('student_id', studentId).eq('voice_key', voiceKey).maybeSingle();
   if (row && row.storage_path) await sb.storage.from('voice-notes').remove([row.storage_path]);
   await sb.from('coach_voice_notes').delete().eq('student_id', studentId).eq('voice_key', voiceKey);
+}
+
+async function _cleanupDayVoiceNotes(day) {
+  if (typeof isCoach === 'function' && isCoach()) return;
+  const dayData = trainingData.days[day];
+  if (!dayData || !dayData.exercises) return;
+  for (const ex of dayData.exercises) {
+    const vKey = day + '_' + ex.name;
+    if (!savedVoice[vKey]) continue;
+    delete savedVoice[vKey];
+    await _deleteVoiceFromSupabase(vKey);
+  }
+  localStorage.setItem(pk('voice'), JSON.stringify(savedVoice));
 }
 
 async function _loadVoiceFromSupabase(studentId) {
