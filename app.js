@@ -2407,44 +2407,7 @@ function saveNotes() {
 // ============================================================
 // GRAPHS
 // ============================================================
-const chartColors = {
-  poids:   { line: '#C8FF00', bg: 'rgba(200,255,0,0.12)' },
-  graisse: { line: '#FF4444', bg: 'rgba(255,68,68,0.12)' },
-  eau:     { line: '#44AAFF', bg: 'rgba(68,170,255,0.12)' },
-  muscle:  { line: '#FF9900', bg: 'rgba(255,153,0,0.12)' }
-};
-
-function makeChart(id, label, key, color) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  const ctx = el.getContext('2d');
-  if (charts[id]) charts[id].destroy();
-  const weeks = savedProgress.weeks.map(w => 'S' + w);
-  charts[id] = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: weeks,
-      datasets: [{ label, data: savedProgress[key],
-        borderColor: color.line, backgroundColor: color.bg,
-        borderWidth: 2.5, pointBackgroundColor: color.line,
-        pointRadius: 5, tension: 0.4, fill: true }]
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { labels: { color: '#ccc', font: { size: 12 } } } },
-      scales: {
-        x: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-        y: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.07)' } }
-      }
-    }
-  });
-}
-
 function initCharts() {
-  makeChart('chart-poids',   'Poids (kg)',             'poids',   chartColors.poids);
-  makeChart('chart-graisse', 'Graisse corporelle (%)', 'graisse', chartColors.graisse);
-  makeChart('chart-eau',     "Volume d'eau (%)",       'eau',     chartColors.eau);
-  makeChart('chart-muscle',  'Masse musculaire (kg)',  'muscle',  chartColors.muscle);
   updateExerciseChart();
   updateVolumeChart();
   updateVolumeStackedChart();
@@ -2629,46 +2592,6 @@ function renderBilanHistory() {
 
   wrap.appendChild(timeline);
   section.appendChild(wrap);
-}
-
-function addDataEntry() {
-  const week    = parseInt(document.getElementById('entry-week').value);
-  const poids   = parseFloat(document.getElementById('entry-poids').value);
-  const graisse = parseFloat(document.getElementById('entry-graisse').value);
-  const eau     = parseFloat(document.getElementById('entry-eau').value);
-  const muscle  = parseFloat(document.getElementById('entry-muscle').value);
-  if (!week) return;
-
-  // Update local state
-  const idx = savedProgress.weeks.indexOf(week);
-  if (idx === -1) {
-    savedProgress.weeks.push(week);
-    savedProgress.poids.push(isNaN(poids) ? null : poids);
-    savedProgress.graisse.push(isNaN(graisse) ? null : graisse);
-    savedProgress.eau.push(isNaN(eau) ? null : eau);
-    savedProgress.muscle.push(isNaN(muscle) ? null : muscle);
-  } else {
-    if (!isNaN(poids))   savedProgress.poids[idx]   = poids;
-    if (!isNaN(graisse)) savedProgress.graisse[idx] = graisse;
-    if (!isNaN(eau))     savedProgress.eau[idx]     = eau;
-    if (!isNaN(muscle))  savedProgress.muscle[idx]  = muscle;
-  }
-  localStorage.setItem(pk('progress'), JSON.stringify(savedProgress));
-  initCharts();
-
-  // Sync to Supabase if authenticated
-  if (typeof sb !== 'undefined' && typeof activeStudentId === 'function' && activeStudentId()) {
-    sb.from('body_metrics').upsert({
-      student_id:    activeStudentId(),
-      week_number:   week,
-      recorded_at:   new Date().toISOString().slice(0, 10),
-      weight_kg:     isNaN(poids)   ? null : poids,
-      body_fat_pct:  isNaN(graisse) ? null : graisse,
-      water_pct:     isNaN(eau)     ? null : eau,
-      muscle_kg:     isNaN(muscle)  ? null : muscle,
-    }, { onConflict: 'student_id,week_number' })
-      .then(({ error }) => { if (error) console.warn('[sync] body_metrics', error.message); });
-  }
 }
 
 function _buildExerciseProgress() {
