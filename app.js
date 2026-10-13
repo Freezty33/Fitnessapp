@@ -69,7 +69,7 @@ function loadProfileData() {
   savedVideos   = JSON.parse(localStorage.getItem(pk('videos'))   || '{}');
   savedYoutube  = JSON.parse(localStorage.getItem(pk('youtube'))  || '{}');
   savedNotes    = JSON.parse(localStorage.getItem(pk('notes'))    || '{}');
-  savedProgress = JSON.parse(localStorage.getItem(pk('progress')) || JSON.stringify(progressData));
+  savedProgress = JSON.parse(localStorage.getItem(pk('progress')) || 'null') || { weeks: [], poids: [], graisse: [], eau: [], muscle: [] };
   mealOptions   = JSON.parse(localStorage.getItem(pk('meals'))    || '{}');
   weekCount     = parseInt(localStorage.getItem(pk('weekCount'))  || '5');
   dayCount      = parseInt(localStorage.getItem(pk('dayCount'))   || String(Object.keys(trainingData.days).length));
@@ -182,8 +182,9 @@ function updateKPIs() {
       }
     }
 
-    // A week is complete if at least one day was done in it
-    if (daysCompletedThisWeek >= 1) seminesCompletes++;
+    // A week is complete if at least 60% of training days were done
+    const weekThreshold = Math.max(1, Math.ceil(dayIds.length * 0.6));
+    if (daysCompletedThisWeek >= weekThreshold) seminesCompletes++;
   }
 
   document.getElementById('kpi-jours').textContent     = joursRealises;
@@ -1047,7 +1048,7 @@ function _syncWmLog() {
     week_number:   wIdx + 1,
     logged_date:   new Date().toISOString().slice(0, 10),
     series_done:   String(w.series || ''),
-    reps_done:     String(w.done   || ''),
+    reps_done:     String(w.reps   || ''),
     charge_kg:     parseFloat(w.charge) || null,
     completed:     !!(w.done && String(w.done).trim()),
   });
@@ -2019,7 +2020,7 @@ function saveWeekField(dayId, exIdx, wIdx, field, el) {
     saveExerciseLog(activeStudentId(), {
       exercise_name: ex.name,
       week_number:   wIdx + 1,
-      logged_date:   new Date().toISOString().slice(0, 10),
+      logged_date:   new Date().toLocaleDateString('sv'),
       series_done:   String(w.series || ''),
       reps_done:     String(w.reps   || ''),
       charge_kg:     parseFloat(w.charge) || null,
@@ -2376,7 +2377,9 @@ const chartColors = {
 };
 
 function makeChart(id, label, key, color) {
-  const ctx = document.getElementById(id).getContext('2d');
+  const el = document.getElementById(id);
+  if (!el) return;
+  const ctx = el.getContext('2d');
   if (charts[id]) charts[id].destroy();
   const weeks = savedProgress.weeks.map(w => 'S' + w);
   charts[id] = new Chart(ctx, {
@@ -3306,8 +3309,16 @@ function _computeVolumeData(filterGroup) {
       (day.exercises || []).forEach(ex => {
         (ex.weeks || []).forEach((w, wIdx) => {
           if (wIdx >= weekCount) return;
-          const charge = parseFloat(w.charge) || 0;
-          const reps   = parseFloat(String(w.reps || '').split('-')[0].split('+')[0]) || 0;
+          const rawCharge = parseFloat(w.charge);
+          // Bodyweight exercise (null charge): use last known bodyweight or 75kg fallback
+          const studentBW = parseFloat((savedProgress.poids || []).filter(v => v != null).at(-1)) || 75;
+          const charge = isNaN(rawCharge)
+            ? (w.charge == null && (parseFloat(w.series) || 0) > 0 ? studentBW : 0)
+            : rawCharge;
+          const repsStr = String(w.reps || '');
+          const reps = repsStr === 'max'
+            ? 10
+            : parseFloat(repsStr.split('-')[0].split('+')[0]) || 0;
           const series = parseFloat(w.series) || 0;
           weeklyVol[wIdx] += charge * reps * series;
         });
@@ -3576,6 +3587,7 @@ async function loadStudentData(studentId) {
 
   // Paint immediately from localStorage cache — only reset nav when switching students
   if (switchingStudent) {
+    workoutFeedback = {}; // reset before loadProfileData to avoid stale data from prior student
     loadProfileData(); // resets currentDay/currentWeek to 1
   } else {
     // Reload data but preserve current navigation position
@@ -3630,6 +3642,13 @@ async function loadStudentData(studentId) {
       muscle:  metrics.map(r => r.muscle_kg),
     };
     localStorage.setItem(pk('progress'), JSON.stringify(savedProgress));
+    // Always refresh charts after real metrics arrive, regardless of tab visibility
+    initCharts();
+  } else {
+    // New student with no metrics yet: reset to empty (not demo data)
+    savedProgress = { weeks: [], poids: [], graisse: [], eau: [], muscle: [] };
+    localStorage.setItem(pk('progress'), JSON.stringify(savedProgress));
+    initCharts();
   }
 
   // exercise_logs are not applied here — logs lack day_number so applying them
@@ -3678,10 +3697,7 @@ async function loadStudentData(studentId) {
   await _loadVoiceFromSupabase(studentId);
   renderTraining(); // re-render so newly loaded voice notes appear
 
-  // Refresh graphs if the tab is currently visible
-  if (document.getElementById('tab-graphs')?.classList.contains('active')) {
-    initCharts();
-  }
+  // Charts are refreshed inside the metrics fetch block above
 }
 
 // Converts a Supabase workout_plan row into the local trainingData.days shape
