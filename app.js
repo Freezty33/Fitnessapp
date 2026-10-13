@@ -2339,6 +2339,7 @@ function saveYoutubeLink() {
   localStorage.setItem(pk('youtube'), JSON.stringify(savedYoutube));
   setYoutubeIframe(url);
   renderTraining();
+  persistTraining(); // sync youtube_url to Supabase exercise_assignments
   const btn = document.querySelector('#vpanel-youtube .btn-primary');
   btn.textContent = '✓ Enregistré';
   setTimeout(() => btn.textContent = 'Enregistrer', 1500);
