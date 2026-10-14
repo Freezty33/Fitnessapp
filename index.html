@@ -2,14 +2,14 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Max Fit — Coaching</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#C8FF00">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Max Fit">
-<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="stylesheet" href="style.css">
 <script src="chart.min.js"></script>
 <script src="supabase.js"></script>
@@ -548,13 +548,49 @@
 <script src="offline-sync.js"></script>
 <script src="app.js"></script>
 <script>
-  // Register service worker
+  // Register service worker + update prompt
   if ('serviceWorker' in navigator) {
+    function showUpdateToast(worker) {
+      if (document.getElementById('sw-update-toast')) return;
+      const t = document.createElement('div');
+      t.id = 'sw-update-toast';
+      t.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:99999;background:#C8FF00;color:#111;font-weight:600;padding:12px 14px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,.5)';
+      const msg = document.createElement('span');
+      msg.textContent = 'Nouvelle version disponible';
+      const btn = document.createElement('button');
+      btn.textContent = 'Actualiser';
+      btn.style.cssText = 'background:#111;color:#C8FF00;border:0;border-radius:8px;padding:8px 12px;font-weight:700';
+      btn.onclick = () => worker.postMessage('SKIP_WAITING');
+      t.appendChild(msg); t.appendChild(btn);
+      document.body.appendChild(t);
+    }
     window.addEventListener('load', () =>
       navigator.serviceWorker.register('/sw.js')
-        .then(r => console.log('SW registered', r.scope))
+        .then(reg => {
+          // A worker already waiting (e.g. update found on a previous visit)
+          if (reg.waiting && navigator.serviceWorker.controller) showUpdateToast(reg.waiting);
+          reg.addEventListener('updatefound', () => {
+            const nw = reg.installing;
+            if (!nw) return;
+            nw.addEventListener('statechange', () => {
+              if (nw.state === 'installed' && navigator.serviceWorker.controller) showUpdateToast(nw);
+            });
+          });
+          // Check for a new version whenever the app returns to the foreground
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') reg.update().catch(() => {});
+          });
+        })
         .catch(e => console.warn('SW failed', e))
     );
+    // Reload once the new worker takes control
+    let _reloading = false;
+    const _hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (_reloading || !_hadController) return;
+      _reloading = true;
+      location.reload();
+    });
   }
   // Boot auth after all scripts are loaded
   window.addEventListener('load', () => initAuth());

@@ -1,4 +1,5 @@
-const CACHE   = 'maxfit-v26';
+// __BUILD__ is replaced with the git short SHA at Netlify build time (see netlify.toml)
+const CACHE   = 'maxfit-v27-__BUILD__';
 const OFFLINE = '/offline.html';
 
 const PRECACHE = [
@@ -15,12 +16,14 @@ const PRECACHE = [
   '/supabase.js',
 ];
 
+// No automatic skipWaiting: a new version waits until the user taps
+// "Actualiser" in the update toast (page posts SKIP_WAITING).
 self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE)
-      .then(c => c.addAll(PRECACHE))
-      .then(() => self.skipWaiting())
-  );
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(PRECACHE)));
+});
+
+self.addEventListener('message', e => {
+  if (e.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {
@@ -36,8 +39,9 @@ self.addEventListener('fetch', e => {
 
   // Never intercept Supabase API calls — offline-sync handles retry
   if (url.hostname.includes('supabase.co')) return;
+  if (e.request.method !== 'GET') return;
 
-  // Navigation — serve cached shell, fall back to offline page
+  // Navigation — serve network, fall back to cached shell, then offline page
   if (e.request.mode === 'navigate') {
     e.respondWith(
       fetch(e.request).catch(() =>
@@ -47,7 +51,21 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Static assets — cache-first
+  // JS / CSS — network-first so a fresh index.html never runs stale code
+  if (url.origin === location.origin && /\.(js|css)$/.test(url.pathname)) {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        if (res && res.status === 200) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return res;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  // Other static assets (images, icons) — cache-first
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;

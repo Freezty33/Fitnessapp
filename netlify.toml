@@ -1,5 +1,7 @@
 [build]
   functions = "netlify/functions"
+  # Stamp the service-worker cache name with the commit so every deploy gets a fresh cache
+  command   = "sed -i \"s/__BUILD__/$(echo ${COMMIT_REF:-dev} | cut -c1-7)/\" sw.js"
 
 [[redirects]]
   from   = "/*"
