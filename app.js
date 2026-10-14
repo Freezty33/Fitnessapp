@@ -2875,25 +2875,55 @@ function selectMealOption(day, mealId, optIdx) {
   renderMeals();
 }
 
+// Nutrition plan sync (coach edits -> nutrition_plans -> student, via realtime)
+let _nutSaveTimer = null;
+function _persistNutrition() {
+  const sid = Ctx.id;
+  localStorage.setItem(pk('nutData', sid), JSON.stringify(nutritionData.meals));
+  if (!isCoach() || !sid || typeof sb === 'undefined') return;  // students keep local-only edits
+  const meals = JSON.parse(JSON.stringify(nutritionData.meals));  // snapshot at edit time
+  const coachId = myProfile().id;
+  clearTimeout(_nutSaveTimer);
+  _nutSaveTimer = setTimeout(async () => {
+    const { error } = await sb.from('nutrition_plans').upsert({
+      student_id: sid, coach_id: coachId, plan_data: { meals }, updated_at: new Date().toISOString(),
+    }, { onConflict: 'student_id' });
+    if (error) console.warn('[nutrition save]', error.message);
+  }, 800);
+}
+
+async function _loadNutritionFromSupabase(studentId, gen) {
+  const { data: plan, error } = await sb.from('nutrition_plans').select('plan_data').eq('student_id', studentId).maybeSingle();
+  if (error || !Ctx.isCurrent(gen)) return;
+  const meals = plan && plan.plan_data && plan.plan_data.meals;
+  if (meals && meals.length) {
+    nutritionData.meals = meals;
+    localStorage.setItem(pk('nutData', studentId), JSON.stringify(meals));
+  } else if (isCoach() && nutritionData.meals.length) {
+    _persistNutrition();  // first time: publish the coach's current plan for this student
+  }
+  renderMeals();
+}
+
 // Feature 3: save editable nutrition cell
 function saveNutCell(mealIdx, optIdx, itemIdx, field, el) {
   const raw = el.textContent.replace(/g$/, '').trim();
   const num = parseFloat(raw);
   const val = (field !== 'food' && field !== 'qty' && !isNaN(num)) ? num : raw;
   nutritionData.meals[mealIdx].options[optIdx].items[itemIdx][field] = val;
-  localStorage.setItem(pk('nutData'), JSON.stringify(nutritionData.meals));
+  _persistNutrition();
 }
 
 // Feature 3: save editable meal header field (type or icon)
 function saveNutMealField(mealIdx, field, el) {
   nutritionData.meals[mealIdx][field] = el.textContent.trim();
-  localStorage.setItem(pk('nutData'), JSON.stringify(nutritionData.meals));
+  _persistNutrition();
 }
 
 // Add a blank food row to a meal option
 function addNutRow(mealIdx, optIdx) {
   nutritionData.meals[mealIdx].options[optIdx].items.push({ food: '', qty: '', p: 0, g: 0, l: 0, kcal: 0 });
-  localStorage.setItem(pk('nutData'), JSON.stringify(nutritionData.meals));
+  _persistNutrition();
   renderMeals();
   // Focus the new food cell
   setTimeout(() => {
@@ -2910,7 +2940,7 @@ function addNutRow(mealIdx, optIdx) {
 // Delete a food row from a meal option
 function deleteNutRow(mealIdx, optIdx, itIdx) {
   nutritionData.meals[mealIdx].options[optIdx].items.splice(itIdx, 1);
-  localStorage.setItem(pk('nutData'), JSON.stringify(nutritionData.meals));
+  _persistNutrition();
   renderMeals();
 }
 
@@ -3229,6 +3259,34 @@ function renderComparison() {
 }
 
 // --- measurements ---
+function _pushMeasurement(entry) {
+  const sid = Ctx.id;
+  if (!sid || typeof sb === 'undefined') return;
+  const { week, ...data } = entry;
+  return sb.from('body_measurements')
+    .upsert({ student_id: sid, week, data, updated_at: new Date().toISOString() }, { onConflict: 'student_id,week' })
+    .then(({ error }) => { if (error) console.warn('[measurements save]', error.message); });
+}
+
+async function _loadMeasurementsFromSupabase(studentId, gen) {
+  const { data: rows, error } = await sb.from('body_measurements').select('week, data').eq('student_id', studentId);
+  if (error || !Ctx.isCurrent(gen)) return;
+  const remote = (rows || []).map(r => ({ week: r.week, ...r.data }));
+  // Students: push local-only entries (legacy localStorage) up once
+  if (!isCoach()) {
+    const have = new Set(remote.map(m => m.week));
+    for (const m of measurements) {
+      if (m.week && !have.has(m.week)) { await _pushMeasurement(m); remote.push(m); }
+    }
+    if (!Ctx.isCurrent(gen)) return;
+  }
+  measurements = remote.sort((a, b) => a.week - b.week);
+  localStorage.setItem(pk('measurements', studentId), JSON.stringify(measurements));
+  _populateWeekSelects();
+  renderMeasurementCharts();
+  renderMeasurementHistory();
+}
+
 function saveMeasurements() {
   const weekSel = document.getElementById('meas-week');
   const week = parseInt(weekSel ? weekSel.value : 0);
@@ -3251,6 +3309,7 @@ function saveMeasurements() {
   else measurements[idx] = entry;
   measurements.sort((a, b) => a.week - b.week);
   localStorage.setItem(pk('measurements'), JSON.stringify(measurements));
+  _pushMeasurement(entry);
   renderMeasurementCharts();
   renderMeasurementHistory();
   _populateWeekSelects();
@@ -3261,6 +3320,8 @@ function saveMeasurements() {
 function deleteMeasurement(week) {
   measurements = measurements.filter(m => m.week !== week);
   localStorage.setItem(pk('measurements'), JSON.stringify(measurements));
+  if (Ctx.id) sb.from('body_measurements').delete().eq('student_id', Ctx.id).eq('week', week)
+    .then(({ error }) => { if (error) console.warn('[measurements delete]', error.message); });
   renderMeasurementCharts();
   renderMeasurementHistory();
 }
@@ -3730,6 +3791,8 @@ async function loadStudentData(studentId) {
   }
 
   _loadPhotosFromSupabase(studentId, gen);
+  _loadMeasurementsFromSupabase(studentId, gen);
+  _loadNutritionFromSupabase(studentId, gen);
 
   // Fetch body metrics
   const { data: metrics } = await sb
