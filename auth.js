@@ -41,12 +41,17 @@ async function _onSignedIn(uid) {
     }
     _setupCoachSync();
   } else {
-    const { data } = await sb
-      .from('student_profiles')
-      .select('id')
-      .eq('user_id', _myProfile.id)
-      .single();
-    _viewingStudentId = data ? data.id : null;
+    let sid = null;
+    try {
+      const { data } = await sb
+        .from('student_profiles')
+        .select('id')
+        .eq('user_id', _myProfile.id)
+        .single();
+      if (data) { sid = data.id; localStorage.setItem('mf_sid_' + _myProfile.id, sid); }
+    } catch (e) { /* offline */ }
+    if (!sid) sid = localStorage.getItem('mf_sid_' + _myProfile.id);
+    _viewingStudentId = sid;
     if (_viewingStudentId && typeof loadStudentData === 'function') {
       await loadStudentData(_viewingStudentId);
       _setupStudentSync(_viewingStudentId);
@@ -55,9 +60,16 @@ async function _onSignedIn(uid) {
   hideLoginScreen();
 }
 
+// Offline-safe: a network failure falls back to the last known profile instead
+// of being treated as "no profile" (which would sign the user out of the UI).
 async function _fetchProfile(uid) {
-  const { data } = await sb.from('profiles').select('*').eq('id', uid).single();
-  return data;
+  const key = 'mf_profile_' + uid;
+  try {
+    const { data, error } = await sb.from('profiles').select('*').eq('id', uid).single();
+    if (data) { localStorage.setItem(key, JSON.stringify(data)); return data; }
+    if (error && error.code === 'PGRST116') return null;  // genuinely no such profile
+  } catch (e) { /* network error: use cache below */ }
+  try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; }
 }
 
 // ── Show déconnexion button for all signed-in users ───────────
@@ -350,7 +362,9 @@ function _showCreateStudentModal() {
 
 // ── Auth state listener ───────────────────────────────────────
 sb.auth.onAuthStateChange(async (event, session) => {
-  if (event === 'SIGNED_OUT' || !session) {
+  // Only an explicit sign-out clears the UI; a null session from a failed
+  // offline token refresh must not kick the user to the login screen.
+  if (event === 'SIGNED_OUT') {
     _myProfile = null;
     _viewingStudentId = null;
     const controls = document.getElementById('coach-header-controls');
@@ -360,7 +374,8 @@ sb.auth.onAuthStateChange(async (event, session) => {
     _hideSignOutButton();
     showLoginScreen();
   }
-  if (event === 'SIGNED_IN') {
+  // SIGNED_IN also fires on token refresh / app refocus: skip if already loaded for this user
+  if (event === 'SIGNED_IN' && session && !(_myProfile && _myProfile.id === session.user.id)) {
     await _onSignedIn(session.user.id);
   }
 });
