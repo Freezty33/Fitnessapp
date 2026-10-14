@@ -147,7 +147,9 @@ function _renderStudentSwitcher() {
   const banner = document.getElementById('viewing-banner');
   if (banner) {
     banner.style.display = current ? 'block' : 'none';
-    banner.textContent = current ? 'Vous consultez : ' + current.name : '';
+    banner.textContent = current ? 'Vous consultez : ' + current.name + ' ▾' : '';
+    banner.style.cursor = 'pointer';
+    banner.onclick = _openStudentSheet;
   }
 
   // Desktop dropdown items
@@ -198,6 +200,57 @@ function _renderStudentSwitcher() {
       mobileWrap.appendChild(item);
     });
   }
+}
+
+// Mobile student picker: the hamburger drawer is hidden on phones (<=480px),
+// so the "Vous consultez" banner opens this sheet instead.
+function _openStudentSheet() {
+  if (!isCoach() || document.getElementById('student-sheet')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'student-sheet';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:99990;background:rgba(0,0,0,.6);display:flex;align-items:flex-end';
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  const box = document.createElement('div');
+  box.style.cssText = 'width:100%;max-height:70vh;overflow:auto;background:var(--surface,#111);border-radius:16px 16px 0 0;padding:14px 14px calc(18px + env(safe-area-inset-bottom))';
+  const title = document.createElement('div');
+  title.textContent = 'Changer d\'étudiant';
+  title.style.cssText = 'font-weight:700;margin-bottom:10px;color:var(--accent,#C8FF00)';
+  box.appendChild(title);
+  _students.forEach(st => {
+    const item = document.createElement('button');
+    item.className = 'student-switcher-item' + (st.id === _viewingStudentId ? ' active' : '');
+    item.style.cssText = 'width:100%;margin-bottom:6px';
+    const avatar = document.createElement('span');
+    avatar.className = 'student-switcher-avatar';
+    avatar.textContent = st.name.charAt(0).toUpperCase();
+    const name = document.createElement('span');
+    name.textContent = st.name;
+    item.appendChild(avatar);
+    item.appendChild(name);
+    item.addEventListener('click', () => {
+      overlay.remove();
+      _setViewingStudent(st.id);
+      _renderStudentSwitcher();
+      if (typeof onStudentSwitch === 'function') onStudentSwitch(st.id);
+    });
+    box.appendChild(item);
+  });
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:8px;margin-top:8px';
+  const add = document.createElement('button');
+  add.className = 'coach-add-btn';
+  add.style.flex = '1';
+  add.textContent = '+ Ajouter';
+  add.addEventListener('click', () => { overlay.remove(); _showCreateStudentModal(); });
+  const del = document.createElement('button');
+  del.className = 'coach-delete-btn';
+  del.textContent = '🗑';
+  del.addEventListener('click', () => { overlay.remove(); _confirmDeleteStudent(); });
+  row.appendChild(add);
+  row.appendChild(del);
+  box.appendChild(row);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
 }
 
 function _toggleStudentDropdown() {
