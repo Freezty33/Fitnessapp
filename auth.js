@@ -493,6 +493,7 @@ function _teardownStudentSync() {
 // doesn't require resubscribing — only the currently-viewed student's data
 // is refreshed, matching plan section 4 step 6.
 let _coachRealtimeChannel = null;
+let _coachLogReloadTimer = null;
 
 function _setupCoachSync() {
   if (_coachRealtimeChannel) {
@@ -504,7 +505,11 @@ function _setupCoachSync() {
       (payload) => {
         const sid = payload.new?.student_id || payload.old?.student_id;
         if (sid && sid === _viewingStudentId && typeof loadStudentData === 'function') {
-          loadStudentData(_viewingStudentId);
+          // Debounce: a burst of student logs triggers a single reload
+          clearTimeout(_coachLogReloadTimer);
+          _coachLogReloadTimer = setTimeout(() => {
+            if (_viewingStudentId === sid) loadStudentData(sid);
+          }, 500);
         }
       })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'rdv_bookings',
@@ -517,6 +522,7 @@ function _setupCoachSync() {
 }
 
 function _teardownCoachSync() {
+  clearTimeout(_coachLogReloadTimer);
   if (_coachRealtimeChannel) {
     sb.removeChannel(_coachRealtimeChannel);
     _coachRealtimeChannel = null;

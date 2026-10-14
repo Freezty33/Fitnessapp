@@ -904,12 +904,11 @@ function _wmRender(dir) {
 
   // Previous week hint
   let prevHint = '';
-  if (wIdx > 0) {
-    const prevW = ex.weeks && ex.weeks[wIdx - 1];
-    const prevDone = prevW && String(prevW.done || '').trim();
-    if (prevDone && prevDone !== '—') {
-      prevHint = `<span class="wm-prev-hint">S${wIdx} : ${h(prevDone)}</span>`;
-    }
+  {
+    const prev = _prevPerformance(ex, wIdx);
+    prevHint = prev
+      ? `<span class="wm-prev-hint">S${prev.week} : ${h(prev.done)}</span>`
+      : `<span class="wm-prev-hint">Première fois</span>`;
   }
 
   // Voice note
@@ -1209,6 +1208,22 @@ function seekWmVoice(e) {
 // ============================================================
 // TRAINING — RENDER (inline editable)
 // ============================================================
+// Latest completed performance before week index wIdx. Scans backwards so a
+// skipped week falls back to the last one actually done. Exercise logs are
+// already merged into ex.weeks by loadStudentData, so no extra query is needed.
+function _prevPerformance(ex, wIdx) {
+  const weeks = (ex && ex.weeks) || [];
+  for (let i = Math.min(wIdx, weeks.length) - 1; i >= 0; i--) {
+    const w = weeks[i];
+    const done = w && String(w.done || '').trim();
+    if (done && done !== '—') {
+      const charge = String(w.charge === undefined || w.charge === null ? '' : w.charge).trim();
+      return { week: i + 1, done, charge: charge && charge !== '—' ? charge : '' };
+    }
+  }
+  return null;
+}
+
 function renderTraining() {
   stopAllTimers();
   const grid = document.getElementById('training-grid');
@@ -1251,15 +1266,13 @@ function renderTraining() {
     // Feature 2: previous session hints
     let prevHint = '';
     let prevChargeHint = '';
-    if (wIdx > 0) {
-      const prevW = ex.weeks[wIdx - 1];
-      const prevDone = prevW && String(prevW.done || '').trim();
-      if (prevDone && prevDone !== '—') {
-        prevHint = `<span class="prev-session">S${wIdx}: ${h(prevDone)}</span>`;
-      }
-      const prevCharge = prevW && String(prevW.charge || '').trim();
-      if (prevCharge && prevCharge !== '—') {
-        prevChargeHint = `<span class="prev-session">S${wIdx}: ${h(prevCharge)} kg</span>`;
+    {
+      const prev = _prevPerformance(ex, wIdx);
+      if (prev) {
+        prevHint = `<span class="prev-session">S${prev.week}: ${h(prev.done)}</span>`;
+        if (prev.charge) prevChargeHint = `<span class="prev-session">S${prev.week}: ${h(prev.charge)} kg</span>`;
+      } else {
+        prevHint = `<span class="prev-session">Première fois</span>`;
       }
     }
 
