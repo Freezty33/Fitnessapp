@@ -1099,6 +1099,8 @@ function _syncWmLog() {
   const w  = ex.weeks[wIdx] || {};
   saveExerciseLog(activeStudentId(), {
     exercise_name: ex.name,
+    day_number:    currentDay,
+    done_value:    String(w.done ?? ''),
     week_number:   wIdx + 1,
     logged_date:   localDate(),
     series_done:   String(w.series || ''),
@@ -2089,6 +2091,8 @@ function saveWeekField(dayId, exIdx, wIdx, field, el) {
     const w  = weeks[wIdx];
     saveExerciseLog(activeStudentId(), {
       exercise_name: ex.name,
+      day_number:    dayId,
+      done_value:    String(w.done ?? ''),
       week_number:   wIdx + 1,
       logged_date:   localDate(),
       series_done:   String(w.series || ''),
@@ -3614,6 +3618,39 @@ async function loadStudentData(studentId) {
       localStorage.setItem(pk('dayCount'),      dayCount);
       localStorage.setItem(pk('planUpdatedAt'), remoteTs || new Date().toISOString());
       renderSelectors();
+      renderTraining();
+      _renderSeanceFooter(currentDay + '_' + currentWeek);
+    }
+  }
+
+  // Apply student exercise logs (charge / réalisé) to the plan view.
+  // Students can't write workout_plans, so exercise_logs is their only channel.
+  // Only logs that carry day_number are applied, and only if newer than the plan.
+  {
+    const { data: logs } = await sb
+      .from('exercise_logs')
+      .select('exercise_name, day_number, week_number, series_done, reps_done, charge_kg, done_value, completed, synced_at')
+      .eq('student_id', studentId)
+      .not('day_number', 'is', null)
+      .order('synced_at', { ascending: true });
+    if (!Ctx.isCurrent(gen)) return;
+    let applied = false;
+    (logs || []).forEach(l => {
+      if (plan && plan.updated_at && l.synced_at && l.synced_at <= plan.updated_at) return;
+      const day = trainingData.days[l.day_number];
+      const ex = day && (day.exercises || []).find(e => e.name === l.exercise_name);
+      if (!ex) return;
+      if (!ex.weeks) ex.weeks = [];
+      while (ex.weeks.length < l.week_number) ex.weeks.push({ series:'', reps:'', charge:'', done:'' });
+      const w = ex.weeks[l.week_number - 1];
+      if (l.series_done) w.series = l.series_done;
+      if (l.reps_done)   w.reps   = l.reps_done;
+      if (l.charge_kg != null) w.charge = l.charge_kg;
+      w.done = l.completed ? (l.done_value || w.done || '') : '';
+      applied = true;
+    });
+    if (applied) {
+      localStorage.setItem(pk('training'), JSON.stringify(trainingData.days));
       renderTraining();
       _renderSeanceFooter(currentDay + '_' + currentWeek);
     }
