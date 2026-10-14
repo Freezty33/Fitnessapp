@@ -3006,42 +3006,115 @@ function renderPhotosTab() {
   renderMeasurementHistory();
 }
 
+// --- photo storage (private Supabase bucket, compressed JPEG) ---
+async function compressImage(file, max = 1280, q = 0.8) {
+  if (!/^image\//i.test(file.type)) throw new Error('Format non supporté');
+  if (file.size > 20 * 1024 * 1024) throw new Error('Image trop lourde (max 20 Mo)');
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => rej(new Error('Image illisible'));
+      i.src = url;
+    });
+    const r = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * r);
+    c.height = Math.round(img.naturalHeight * r);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return await new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('Compression échouée')), 'image/jpeg', q));
+  } finally { URL.revokeObjectURL(url); }
+}
+
+async function _signedPhotoUrl(path) {
+  const { data } = await sb.storage.from('body-photos').createSignedUrl(path, 3600);
+  return data ? data.signedUrl : null;
+}
+
+async function _uploadPhotoFile(file, week, view) {
+  const sid = Ctx.id;
+  if (!sid) return;
+  const gen = Ctx.gen;
+  try {
+    const blob = await compressImage(file);
+    const path = sid + '/' + week + '_' + view + '.jpg';
+    const { error } = await sb.storage.from('body-photos').upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+    if (error) throw error;
+    const { error: e2 } = await sb.from('progress_photos')
+      .upsert({ student_id: sid, week, angle: view, path }, { onConflict: 'student_id,week,angle' });
+    if (e2) throw e2;
+    const url = await _signedPhotoUrl(path);
+    if (!Ctx.isCurrent(gen)) return;
+    progressPhotos[week + '_' + view] = url;
+  } catch (e) {
+    alert('Photo non enregistrée : ' + (e.message || e));
+    return;
+  }
+  renderPhotoTimeline();
+  renderComparison();
+  _populateWeekSelects();
+}
+
+// Load this student's photos from Supabase (and migrate legacy base64 once)
+async function _loadPhotosFromSupabase(studentId, gen) {
+  const { data: rows, error } = await sb.from('progress_photos').select('week, angle, path').eq('student_id', studentId);
+  if (error || !Ctx.isCurrent(gen)) return;
+  const remote = {};
+  await Promise.all((rows || []).map(async r => {
+    const url = await _signedPhotoUrl(r.path);
+    if (url) remote[r.week + '_' + r.angle] = url;
+  }));
+  if (!Ctx.isCurrent(gen)) return;
+  // legacy local base64 (data URLs) not yet on the server
+  const legacy = {};
+  Object.entries(progressPhotos).forEach(([k, v]) => {
+    if (typeof v === 'string' && v.startsWith('data:') && !remote[k]) legacy[k] = v;
+  });
+  progressPhotos = remote;
+  if (!isCoach()) {
+    for (const [k, dataUrl] of Object.entries(legacy)) {
+      const [w, v] = k.split('_');
+      try {
+        const file = await (await fetch(dataUrl)).blob();
+        await _uploadPhotoFile(new File([file], 'legacy.jpg', { type: file.type || 'image/jpeg' }), parseInt(w), v);
+      } catch (e) { progressPhotos[k] = dataUrl; }
+    }
+    if (!Ctx.isCurrent(gen)) return;
+    if (!Object.keys(progressPhotos).some(k => String(progressPhotos[k]).startsWith('data:'))) {
+      localStorage.removeItem(pk('photos', studentId));
+    }
+  }
+  _populateWeekSelects();
+  renderPhotoTimeline();
+  renderComparison();
+}
+
 // --- upload from top-section buttons ---
 function uploadPhoto(event, view) {
   const file = event.target.files[0];
+  event.target.value = '';
   if (!file) return;
   const week = parseInt(document.getElementById('photo-week-select').value) || 1;
-  const reader = new FileReader();
-  reader.onload = () => {
-    progressPhotos[week + '_' + view] = reader.result;
-    localStorage.setItem(pk('photos'), JSON.stringify(progressPhotos));
-    renderPhotoTimeline();
-    renderComparison();
-    _populateWeekSelects();
-  };
-  reader.readAsDataURL(file);
-  event.target.value = '';
+  _uploadPhotoFile(file, week, view);
 }
 
 // --- upload from timeline inline add button ---
 function uploadPhotoWeek(event, week, view) {
   const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    progressPhotos[week + '_' + view] = reader.result;
-    localStorage.setItem(pk('photos'), JSON.stringify(progressPhotos));
-    renderPhotoTimeline();
-    renderComparison();
-    _populateWeekSelects();
-  };
-  reader.readAsDataURL(file);
   event.target.value = '';
+  if (!file) return;
+  _uploadPhotoFile(file, week, view);
 }
 
-function deletePhoto(week, view) {
+async function deletePhoto(week, view) {
+  const sid = Ctx.id;
+  if (sid) {
+    const path = sid + '/' + week + '_' + view + '.jpg';
+    await sb.storage.from('body-photos').remove([path]);
+    await sb.from('progress_photos').delete().eq('student_id', sid).eq('week', week).eq('angle', view);
+  }
   delete progressPhotos[week + '_' + view];
-  localStorage.setItem(pk('photos'), JSON.stringify(progressPhotos));
   renderPhotoTimeline();
   renderComparison();
 }
@@ -3655,6 +3728,8 @@ async function loadStudentData(studentId) {
       _renderSeanceFooter(currentDay + '_' + currentWeek);
     }
   }
+
+  _loadPhotosFromSupabase(studentId, gen);
 
   // Fetch body metrics
   const { data: metrics } = await sb
