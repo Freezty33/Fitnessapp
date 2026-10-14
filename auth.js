@@ -16,6 +16,7 @@ function isCoach()         { return _myProfile && _myProfile.role === 'coach'; }
 // Single point of truth for "which student am I viewing": keeps the legacy
 // _viewingStudentId var in sync with Ctx (persistence + generation token).
 function _setViewingStudent(id) {
+  if (id !== _viewingStudentId && typeof flushPendingPlanSave === 'function') flushPendingPlanSave();
   _viewingStudentId = id;
   if (typeof Ctx !== 'undefined') Ctx.set(id, { persist: true });
 }
@@ -129,6 +130,13 @@ function _renderStudentSwitcher() {
   // Desktop pill label
   const label = document.getElementById('student-switcher-label');
   if (label) label.textContent = current ? current.name : '—';
+
+  // "Vous consultez" banner (coach only) — guards against editing the wrong student
+  const banner = document.getElementById('viewing-banner');
+  if (banner) {
+    banner.style.display = current ? 'block' : 'none';
+    banner.textContent = current ? 'Vous consultez : ' + current.name : '';
+  }
 
   // Desktop dropdown items
   const dropdown = document.getElementById('student-switcher-dropdown');

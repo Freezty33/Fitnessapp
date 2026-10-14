@@ -101,10 +101,6 @@ function loadProfileData() {
 
 loadProfileData();
 
-function persistTraining() {
-  localStorage.setItem(pk('training'), JSON.stringify(trainingData.days));
-  _saveStudentPlanToSupabase();
-}
 function persistCounts() {
   localStorage.setItem(pk('weekCount', Ctx.id), weekCount);
   localStorage.setItem(pk('dayCount', Ctx.id),  dayCount);
@@ -114,7 +110,20 @@ function persistCounts() {
 // Called after any structural edit (exercises, days, weeks, labels).
 // Debounced so rapid edits don't flood the API.
 let _planSaveTimer = null;
+let _pendingPlanSave = null;
+
+// Run a debounced plan save right now (called before switching student,
+// while the snapshot's generation is still current).
+function flushPendingPlanSave() {
+  if (!_pendingPlanSave) return;
+  clearTimeout(_planSaveTimer);
+  const { sid, snap } = _pendingPlanSave;
+  _pendingPlanSave = null;
+  _savePlanToSupabase(sid, snap);
+}
+
 function persistTraining() {
+  localStorage.setItem(pk('training'), JSON.stringify(trainingData.days));
   // Capture the student and a deep copy of the plan at EDIT TIME, not at timer-fire time (fixes C7)
   const sid = Ctx.id;
   const snap = {
@@ -124,7 +133,8 @@ function persistTraining() {
     days: JSON.parse(JSON.stringify(trainingData.days)),
   };
   clearTimeout(_planSaveTimer);
-  _planSaveTimer = setTimeout(() => _savePlanToSupabase(sid, snap), 800);
+  _pendingPlanSave = { sid, snap };
+  _planSaveTimer = setTimeout(flushPendingPlanSave, 800);
 }
 
 async function _savePlanToSupabase(studentId, snapshot) {
