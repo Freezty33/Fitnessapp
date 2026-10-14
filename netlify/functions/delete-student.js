@@ -5,6 +5,8 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const ANON_KEY     = process.env.SUPABASE_ANON_KEY;
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -62,7 +64,7 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
   const { student_profile_id } = body;
-  if (!student_profile_id) return json(400, { error: 'student_profile_id is required' });
+  if (!UUID_RE.test(student_profile_id || '')) return json(400, { error: 'student_profile_id must be a UUID' });
 
   // ── Verify this student belongs to the calling coach ──────────
   const spRes = await adminFetch(`/rest/v1/student_profiles?id=eq.${student_profile_id}&coach_id=eq.${caller.id}&select=id,user_id`);
@@ -71,16 +73,32 @@ exports.handler = async (event) => {
   }
   const studentAuthId = spRes.data[0].user_id;
 
+  // ── Remove the student's voice-note files (storage is not covered by FK cascade)
+  let storageCleaned = true;
+  const list = await adminFetch(`/storage/v1/object/list/voice-notes`, 'POST', { prefix: `${student_profile_id}/`, limit: 1000 });
+  if (list.ok && Array.isArray(list.data) && list.data.length) {
+    const paths = list.data.map(o => `${student_profile_id}/${o.name}`);
+    const rm = await adminFetch(`/storage/v1/object/voice-notes`, 'DELETE', { prefixes: paths });
+    storageCleaned = rm.ok;
+  } else if (!list.ok) {
+    storageCleaned = false;
+  }
+
   // ── Delete cascades via FK: student_profiles → workout_plans,
   //    exercise_assignments, exercise_logs, body_metrics,
   //    session_feedback, nutrition_plans (all ON DELETE CASCADE)
-  const delSp = await adminFetch(`/rest/v1/student_profiles?id=eq.${student_profile_id}`, 'DELETE');
+  //    coach_id filter repeated so the delete can never touch another coach's student
+  const delSp = await adminFetch(`/rest/v1/student_profiles?id=eq.${student_profile_id}&coach_id=eq.${caller.id}`, 'DELETE');
   if (!delSp.ok && delSp.status !== 404) {
     return json(500, { error: 'Failed to delete student profile' });
   }
 
   // ── Delete the auth user ──────────────────────────────────────
-  await adminFetch(`/auth/v1/admin/users/${studentAuthId}`, 'DELETE');
+  const delAuth = await adminFetch(`/auth/v1/admin/users/${studentAuthId}`, 'DELETE');
+  if (!delAuth.ok && delAuth.status !== 404) {
+    // Profile rows are gone but the login still exists: report it so it can be removed manually
+    return json(207, { ok: false, partial: true, error: 'Student data deleted but auth user removal failed', storageCleaned });
+  }
 
-  return json(200, { ok: true });
+  return json(200, { ok: true, storageCleaned });
 };

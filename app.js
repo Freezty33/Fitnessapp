@@ -6,6 +6,13 @@ function h(s) {
 }
 
 // ============================================================
+// LOCAL DATE HELPER (fixes timezone/midnight bugs)
+// ============================================================
+function localDate(date = new Date()) {
+  return date.toLocaleDateString('sv');  // 'sv' locale gives YYYY-MM-DD
+}
+
+// ============================================================
 // PROFILES
 // ============================================================
 const PROFILE_COLORS = ['#C8FF00','#00D4FF','#FF6B35','#FF3CAC','#7B2FBE','#00C896'];
@@ -16,7 +23,7 @@ let profiles = JSON.parse(localStorage.getItem('fitProfiles') || JSON.stringify(
 let currentProfileId = localStorage.getItem('fitCurrentProfile') || profiles[0].id;
 if (!profiles.find(p => p.id === currentProfileId)) currentProfileId = profiles[0].id;
 
-function pk(key) { return `p_${currentProfileId}_${key}`; }
+function pk(key, sid = Ctx.id) { return `p_${sid}_${key}`; }
 function currentProfile() { return profiles.find(p => p.id === currentProfileId) || profiles[0]; }
 function persistProfiles() {
   localStorage.setItem('fitProfiles', JSON.stringify(profiles));
@@ -92,62 +99,69 @@ function persistTraining() {
   _saveStudentPlanToSupabase();
 }
 function persistCounts() {
-  localStorage.setItem(pk('weekCount'), weekCount);
-  localStorage.setItem(pk('dayCount'),  dayCount);
+  localStorage.setItem(pk('weekCount', Ctx.id), weekCount);
+  localStorage.setItem(pk('dayCount', Ctx.id),  dayCount);
 }
 
 // ── Sync full plan structure to Supabase ──────────────────────
 // Called after any structural edit (exercises, days, weeks, labels).
 // Debounced so rapid edits don't flood the API.
 let _planSaveTimer = null;
-function _saveStudentPlanToSupabase() {
-  if (typeof sb === 'undefined' || typeof activeStudentId !== 'function' || !activeStudentId()) return;
+function persistTraining() {
+  // Capture the student and a deep copy of the plan at EDIT TIME, not at timer-fire time (fixes C7)
+  const sid = Ctx.id;
+  const snap = {
+    gen: Ctx.gen,
+    weekCount,
+    dayCount,
+    days: JSON.parse(JSON.stringify(trainingData.days)),
+  };
   clearTimeout(_planSaveTimer);
-  _planSaveTimer = setTimeout(async () => {
-    const studentId = activeStudentId();
-    if (!studentId) return;
+  _planSaveTimer = setTimeout(() => _savePlanToSupabase(sid, snap), 800);
+}
 
-    // Fetch the plan id for this student
-    const { data: plan } = await sb
-      .from('workout_plans')
-      .select('id')
-      .eq('student_id', studentId)
-      .maybeSingle();
-    if (!plan) return;
+async function _savePlanToSupabase(studentId, snapshot) {
+  if (typeof sb === 'undefined' || !studentId) return;
+  if (!Ctx.isCurrent(snapshot.gen)) return;  // stale: student switched before timer fired
 
-    // Update plan meta
-    await sb.from('workout_plans').update({
-      week_count: weekCount,
-      day_count:  dayCount,
-      updated_at: new Date().toISOString(),
-    }).eq('id', plan.id);
+  // Fetch the plan id
+  const { data: plan } = await sb
+    .from('workout_plans')
+    .select('id')
+    .eq('student_id', studentId)
+    .maybeSingle();
+  if (!plan) return;
 
-    // Delete all existing assignments then re-insert
-    await sb.from('exercise_assignments').delete().eq('plan_id', plan.id);
-
-    const assignments = [];
-    Object.entries(trainingData.days).forEach(([dayNum, day]) => {
-      (day.exercises || []).forEach((ex, pos) => {
-        const firstWeek = ex.weeks && ex.weeks[0];
-        assignments.push({
-          plan_id:        plan.id,
-          day_number:     Number(dayNum),
-          position:       pos,
-          name:           ex.name || '',
-          tips:           ex.tips || '',
-          target_series:  firstWeek ? (parseInt(firstWeek.series) || null) : null,
-          target_reps:    firstWeek ? String(firstWeek.reps || '') : '',
-          target_charge:  firstWeek ? (parseFloat(firstWeek.charge) || null) : null,
-          weeks_data:     ex.weeks || [],
-          youtube_url:    savedYoutube[ex.name] || null,
-        });
+  // Flatten the exercises for the RPC
+  const exercises = [];
+  Object.entries(snapshot.days).forEach(([dayNum, day]) => {
+    (day.exercises || []).forEach((ex, pos) => {
+      exercises.push({
+        day: Number(dayNum),
+        pos,
+        name: ex.name || '',
+        tips: ex.tips || '',
+        sets: ex.weeks?.[0]?.series || null,
+        reps: ex.weeks?.[0]?.reps || '',
+        charge: ex.weeks?.[0]?.charge || null,
+        weeks: ex.weeks || [],
+        video: savedYoutube[ex.name] || null,
       });
     });
+  });
 
-    if (assignments.length > 0) {
-      await sb.from('exercise_assignments').insert(assignments);
-    }
-  }, 800);
+  // Call the atomic RPC (update + delete + insert in one transaction)
+  const { error } = await sb.rpc('save_student_plan', {
+    p_student: studentId,
+    p_week_count: snapshot.weekCount,
+    p_day_count: snapshot.dayCount,
+    p_exercises: exercises,
+  });
+
+  if (error) {
+    console.error('[plan save]', error.message);
+    // Keep the dirty flag: the plan is unsaved, will retry on next timer
+  }
 }
 
 // ============================================================
@@ -1068,11 +1082,11 @@ function _syncWmLog() {
   saveExerciseLog(activeStudentId(), {
     exercise_name: ex.name,
     week_number:   wIdx + 1,
-    logged_date:   new Date().toISOString().slice(0, 10),
+    logged_date:   localDate(),
     series_done:   String(w.series || ''),
     reps_done:     String(w.reps   || ''),
     charge_kg:     parseFloat(w.charge) || null,
-    completed:     !!(w.done && String(w.done).trim()),
+    completed:     String(w.done || '').trim() !== '',  // true only if non-empty
   });
 }
 
@@ -1206,6 +1220,7 @@ function renderTraining() {
       <h2 contenteditable="true" class="editable-title" onblur="saveDayLabel(${currentDay}, this)">${h(dayData.label)}</h2>
       <span class="week-badge">Semaine ${currentWeek}</span>
       <button class="btn-repeat-training" onclick="repeatTraining(${currentDay})">🔁 Répéter cet entraînement</button>
+      <button class="btn-add-exercise" onclick="addExercise()">+ Exercice</button>
     </div>
     <div class="exercises-list">`;
 
@@ -2057,30 +2072,18 @@ function saveWeekField(dayId, exIdx, wIdx, field, el) {
     saveExerciseLog(activeStudentId(), {
       exercise_name: ex.name,
       week_number:   wIdx + 1,
-      logged_date:   new Date().toLocaleDateString('sv'),
+      logged_date:   localDate(),
       series_done:   String(w.series || ''),
       reps_done:     String(w.reps   || ''),
       charge_kg:     parseFloat(w.charge) || null,
-      completed:     field === 'done'
+      completed:     field === 'done' && String(w.done || '').trim() !== ''  // true only if non-empty
     });
   }
 }
 
-async function saveExerciseLog(studentId, log) {
-  if (typeof sb === 'undefined' || !studentId) return;
-  const { error } = await sb.from('exercise_logs').upsert({
-    student_id:    studentId,
-    exercise_name: log.exercise_name,
-    week_number:   log.week_number,
-    logged_date:   log.logged_date,
-    series_done:   log.series_done  || null,
-    reps_done:     log.reps_done    || null,
-    charge_kg:     log.charge_kg    || null,
-    completed:     log.completed    || false,
-    synced_at:     new Date().toISOString(),
-  }, { onConflict: 'student_id,exercise_name,logged_date,week_number' });
-  if (error) console.warn('[sync] exercise_log', error.message);
-}
+// NOTE: saveExerciseLog is defined in offline-sync.js (loaded after app.js)
+// The IndexedDB queue there is the real implementation.
+// This comment is here to clarify why we call saveExerciseLog but don't define it.
 
 // ============================================================
 // REST TIMER (Feature 1)
@@ -3536,10 +3539,14 @@ async function onStudentSwitch(studentId) {
 async function loadStudentData(studentId) {
   if (!studentId || typeof sb === 'undefined') return;
 
-  const switchingStudent = currentProfileId !== studentId;
+  // Capture the generation at START so we can drop stale responses (fixes C6)
+  const gen = Ctx.gen;
 
-  // Namespace all localStorage keys under this student's ID
-  currentProfileId = studentId;
+  const switchingStudent = Ctx.id !== studentId;
+
+  // Update the active student in the context store
+  Ctx.set(studentId, { persist: true });
+  currentProfileId = studentId;  // keep legacy for now
 
   // Fetch coach_id for this student (needed by RDV tab)
   if (typeof sb !== 'undefined') {
@@ -3568,6 +3575,8 @@ async function loadStudentData(studentId) {
     .order('position', { foreignTable: 'exercise_assignments' })
     .maybeSingle();
 
+  if (!Ctx.isCurrent(gen)) return;  // student switched: drop this response
+
   if (plan) {
     // Reload from Supabase whenever the coach has saved a newer version.
     // Compare ISO timestamps: remote wins if no local timestamp exists or if remote is newer.
@@ -3595,6 +3604,8 @@ async function loadStudentData(studentId) {
     .eq('student_id', studentId)
     .order('week_number');
 
+  if (!Ctx.isCurrent(gen)) return;  // student switched: drop this response
+
   if (metrics && metrics.length) {
     savedProgress = {
       weeks:   metrics.map(r => r.week_number),
@@ -3621,6 +3632,8 @@ async function loadStudentData(studentId) {
     .from('session_feedback')
     .select('*')
     .eq('student_id', studentId);
+
+  if (!Ctx.isCurrent(gen)) return;  // student switched: drop this response
 
   if (feedback && feedback.length) {
     // Merge: Supabase data fills gaps but never overwrites an entry already saved locally this session
@@ -3655,8 +3668,13 @@ async function loadStudentData(studentId) {
   // Load extra trainings from Supabase
   await _loadExtraTrainingsFromSupabase(studentId);
 
+  if (!Ctx.isCurrent(gen)) return;  // student switched: drop this response
+
   // Load voice notes from Supabase Storage (cross-device sharing)
   await _loadVoiceFromSupabase(studentId);
+
+  if (!Ctx.isCurrent(gen)) return;  // student switched: drop this response
+
   renderTraining(); // re-render so newly loaded voice notes appear
 
   // Charts are refreshed inside the metrics fetch block above

@@ -408,3 +408,42 @@ create policy "coach update voice"
 create policy "public read voice"
   on storage.objects for select
   using (bucket_id = 'voice-notes');
+
+
+-- ============================================================
+-- 8. ATOMIC PLAN SAVE RPC (Phase 2 fix for C8)
+-- Replaces delete-then-insert with a single transaction.
+-- ============================================================
+
+create or replace function public.save_student_plan(
+  p_student uuid,
+  p_week_count int,
+  p_day_count int,
+  p_exercises jsonb
+)
+returns void language plpgsql security invoker as $$
+begin
+  update public.workout_plans
+    set week_count = p_week_count,
+        day_count = p_day_count,
+        updated_at = now()
+    where student_id = p_student;
+
+  delete from public.exercise_assignments
+    where plan_id in (select id from public.workout_plans where student_id = p_student);
+
+  insert into public.exercise_assignments
+    (plan_id, day_number, position, name, tips, target_series, target_reps, target_charge, weeks_data, youtube_url)
+    select
+      (select id from public.workout_plans where student_id = p_student limit 1),
+      (e->>'day')::int,
+      (e->>'pos')::int,
+      e->>'name',
+      e->>'tips',
+      (e->>'sets')::int,
+      e->>'reps',
+      (e->>'charge')::numeric,
+      (e->'weeks')::jsonb,
+      e->>'video'
+    from jsonb_array_elements(p_exercises) e;
+end $$;
