@@ -13,6 +13,13 @@ function activeStudentId() { return _viewingStudentId; }
 function myProfile()       { return _myProfile; }
 function isCoach()         { return _myProfile && _myProfile.role === 'coach'; }
 
+// Single point of truth for "which student am I viewing": keeps the legacy
+// _viewingStudentId var in sync with Ctx (persistence + generation token).
+function _setViewingStudent(id) {
+  _viewingStudentId = id;
+  if (typeof Ctx !== 'undefined') Ctx.set(id, { persist: true });
+}
+
 // ── Boot ─────────────────────────────────────────────────────
 async function initAuth() {
   const { data: { session } } = await sb.auth.getSession();
@@ -31,6 +38,7 @@ async function _onSignedIn(uid) {
     if (_viewingStudentId && typeof loadStudentData === 'function') {
       await loadStudentData(_viewingStudentId);
     }
+    _setupCoachSync();
   } else {
     const { data } = await sb
       .from('student_profiles')
@@ -95,7 +103,20 @@ async function _buildCoachSwitcher() {
     return { id: st.id, name: (prof && prof.full_name) ? prof.full_name : st.id };
   });
 
-  _viewingStudentId = _students[0].id;
+  // Restore the previously-selected student (sessionStorage) if still valid,
+  // keep the current selection if it's still in the list, else fall back to
+  // the first student. Avoids always jumping to students[0] (plan 3.4/step 4).
+  const validIds = _students.map(s => s.id);
+  let restored;
+  if (_viewingStudentId && validIds.includes(_viewingStudentId)) {
+    restored = _viewingStudentId;
+  } else if (typeof Ctx !== 'undefined') {
+    restored = Ctx.restore(validIds);
+  } else {
+    restored = validIds[0] ?? null;
+  }
+  _viewingStudentId = restored;
+  if (typeof Ctx !== 'undefined') Ctx.set(restored, { persist: true });
   _renderStudentSwitcher();
 
   if (controls)    controls.style.display    = 'flex';
@@ -125,7 +146,7 @@ function _renderStudentSwitcher() {
       item.appendChild(name);
       item.addEventListener('click', () => {
         _closeStudentDropdown();
-        _viewingStudentId = st.id;
+        _setViewingStudent(st.id);
         _renderStudentSwitcher();
         if (typeof onStudentSwitch === 'function') onStudentSwitch(st.id);
       });
@@ -149,7 +170,7 @@ function _renderStudentSwitcher() {
       item.appendChild(avatar);
       item.appendChild(name);
       item.addEventListener('click', () => {
-        _viewingStudentId = st.id;
+        _setViewingStudent(st.id);
         _renderStudentSwitcher();
         if (typeof onStudentSwitch === 'function') onStudentSwitch(st.id);
         if (typeof closeMobileNav === 'function') closeMobileNav();
@@ -386,8 +407,47 @@ function _teardownStudentSync() {
   }
 }
 
+// ── Coach real-time sync ───────────────────────────────────────
+// Coaches previously had no realtime channel at all (plan 3.7): they only
+// saw new logs/bookings after a reload or manual student switch. This
+// channel is scoped to the coach (not per-student), so switching students
+// doesn't require resubscribing — only the currently-viewed student's data
+// is refreshed, matching plan section 4 step 6.
+let _coachRealtimeChannel = null;
+
+function _setupCoachSync() {
+  if (_coachRealtimeChannel) {
+    sb.removeChannel(_coachRealtimeChannel);
+    _coachRealtimeChannel = null;
+  }
+  _coachRealtimeChannel = sb.channel('coach-sync-' + _myProfile.id)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'exercise_logs' },
+      (payload) => {
+        const sid = payload.new?.student_id || payload.old?.student_id;
+        if (sid && sid === _viewingStudentId && typeof loadStudentData === 'function') {
+          loadStudentData(_viewingStudentId);
+        }
+      })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'rdv_bookings',
+        filter: `coach_id=eq.${_myProfile.id}` },
+      () => { if (typeof renderRdvTab === 'function' && typeof currentTab !== 'undefined' && currentTab === 'rdv') renderRdvTab(); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'coach_availability',
+        filter: `coach_id=eq.${_myProfile.id}` },
+      () => { if (typeof renderRdvTab === 'function' && typeof currentTab !== 'undefined' && currentTab === 'rdv') renderRdvTab(); })
+    .subscribe();
+}
+
+function _teardownCoachSync() {
+  if (_coachRealtimeChannel) {
+    sb.removeChannel(_coachRealtimeChannel);
+    _coachRealtimeChannel = null;
+  }
+}
+
 async function signOut() {
   _teardownStudentSync();
+  _teardownCoachSync();
+  if (typeof Ctx !== 'undefined') Ctx.clear();
   await sb.auth.signOut();
 }
 

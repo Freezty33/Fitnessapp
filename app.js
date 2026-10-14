@@ -13,6 +13,13 @@ function localDate(date = new Date()) {
 }
 
 // ============================================================
+// CURRENT TAB TRACKING
+// Needed by onStudentSwitch() and the realtime handlers in auth.js,
+// which only act when the coach/student is currently on the 'rdv' tab.
+// ============================================================
+let currentTab = 'training';
+
+// ============================================================
 // PROFILES
 // ============================================================
 const PROFILE_COLORS = ['#C8FF00','#00D4FF','#FF6B35','#FF3CAC','#7B2FBE','#00C896'];
@@ -218,6 +225,7 @@ const TAB_LABELS = {
 };
 
 function showTab(tab) {
+  currentTab = tab;
   if (_wm) _wmClose();
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -3536,16 +3544,20 @@ async function onStudentSwitch(studentId) {
   if (typeof currentTab !== 'undefined' && currentTab === 'rdv') renderRdvTab();
 }
 
+let _lastLoadedStudentId = null;
+
 async function loadStudentData(studentId) {
   if (!studentId || typeof sb === 'undefined') return;
 
-  // Capture the generation at START so we can drop stale responses (fixes C6)
-  const gen = Ctx.gen;
+  // "Switching" = the data last painted belongs to a different student.
+  // (Ctx.id can't be used: the switcher already sets it before we run.)
+  const switchingStudent = _lastLoadedStudentId !== studentId;
+  _lastLoadedStudentId = studentId;
 
-  const switchingStudent = Ctx.id !== studentId;
-
-  // Update the active student in the context store
+  // Update the active student in the context store, THEN capture the
+  // generation so a later switch invalidates this call (fixes C6)
   Ctx.set(studentId, { persist: true });
+  const gen = Ctx.gen;
   currentProfileId = studentId;  // keep legacy for now
 
   // Fetch coach_id for this student (needed by RDV tab)
