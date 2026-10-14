@@ -138,6 +138,7 @@ function persistTraining() {
 }
 
 async function _savePlanToSupabase(studentId, snapshot) {
+  if (typeof isCoach !== 'function' || !isCoach()) return;  // only coaches update plans
   if (typeof sb === 'undefined' || !studentId) return;
   if (!Ctx.isCurrent(snapshot.gen)) return;  // stale: student switched before timer fired
 
@@ -907,7 +908,7 @@ function _wmRender(dir) {
   {
     const prev = _prevPerformance(ex, wIdx);
     prevHint = prev
-      ? `<span class="wm-prev-hint">S${prev.week} : ${h(prev.done)}</span>`
+      ? `<span class="wm-prev-hint">S${prev.week} : ${h(prev.done)}${prev.charge ? ' · ' + h(prev.charge) + ' kg' : ''}</span>`
       : `<span class="wm-prev-hint">Première fois</span>`;
   }
 
@@ -985,10 +986,12 @@ function _wmRender(dir) {
       </div>
 
       <div class="wm-done-card">
-        <span class="wm-card-label">REPS & SÉRIES RÉALISÉS</span>
+        <div class="wm-done-head">
+          <span class="wm-card-label">REPS & SÉRIES RÉALISÉS</span>
+          ${prevHint}
+        </div>
         <span class="wm-done-input" contenteditable="true" id="wm-done-input"
               onblur="saveWmDone()">${h(done)}</span>
-        ${prevHint}
       </div>
 
       <div class="wm-repos-card">
@@ -1265,12 +1268,10 @@ function renderTraining() {
 
     // Feature 2: previous session hints
     let prevHint = '';
-    let prevChargeHint = '';
     {
       const prev = _prevPerformance(ex, wIdx);
       if (prev) {
-        prevHint = `<span class="prev-session">S${prev.week}: ${h(prev.done)}</span>`;
-        if (prev.charge) prevChargeHint = `<span class="prev-session">S${prev.week}: ${h(prev.charge)} kg</span>`;
+        prevHint = `<span class="prev-session">S${prev.week}: ${h(prev.done)}${prev.charge ? ' · ' + h(prev.charge) + ' kg' : ''}</span>`;
       } else {
         prevHint = `<span class="prev-session">Première fois</span>`;
       }
@@ -1356,14 +1357,12 @@ function renderTraining() {
             <span class="metric-val editable"
                   contenteditable="true"
                   onblur="saveWeekField(${currentDay},${i},${wIdx},'charge',this)">${h(String(w.charge ?? ''))}</span>
-            ${prevChargeHint}
           </div>
           <div class="metric done-metric">
-            <span class="metric-label">Réalisé</span>
+            <div class="metric-head"><span class="metric-label">Réalisé</span>${prevHint}</div>
             <span class="metric-val editable"
                   contenteditable="true"
                   onblur="saveWeekField(${currentDay},${i},${wIdx},'done',this)">${h(String(w.done ?? ''))}</span>
-            ${prevHint}
           </div>
         </div>
         <div class="ex-timer" id="timer-${i}">

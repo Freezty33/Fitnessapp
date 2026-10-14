@@ -1026,6 +1026,8 @@ body {
 .timer-reset:hover { border-color:#ff4444; color:#ff4444; }
 
 /* Prev session hint */
+.metric-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.metric-head .prev-session { margin-top:0; text-align:right; }
 .prev-session { font-size:10px; color:var(--muted); margin-top:3px; display:block; font-style:italic; }
 
 /* Per-row item check */
@@ -3098,6 +3100,14 @@ body {
 .wm-prev-hint {
   font-size: 11px;
   color: var(--muted);
+  text-align: right;
+}
+
+.wm-done-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 /* Repos card */
