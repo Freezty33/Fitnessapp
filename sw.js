@@ -1,5 +1,5 @@
 // __BUILD__ is replaced with the git short SHA at Netlify build time (see netlify.toml)
-const CACHE   = 'maxfit-v28-__BUILD__';
+const CACHE   = 'maxfit-v29-__BUILD__';
 const OFFLINE = '/offline.html';
 
 const PRECACHE = [

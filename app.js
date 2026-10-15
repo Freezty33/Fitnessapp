@@ -77,6 +77,12 @@ let progressPhotos = {};
 // Body measurements (array of {week, poids, taille, waist, chest, armL, armR, thighL, thighR, hips, fat})
 let measurements = [];
 
+// YouTube link for an exercise: the plan value (from Supabase, what students
+// receive) wins over the coach's per-device cache.
+function ytUrlFor(ex) {
+  return (ex && (ex.youtube_url || savedYoutube[ex.name])) || '';
+}
+
 function loadProfileData() {
   const saved = JSON.parse(localStorage.getItem(pk('training')) || 'null');
   trainingData.days = saved || JSON.parse(JSON.stringify(_DEFAULT_DAYS));
@@ -163,7 +169,7 @@ async function _savePlanToSupabase(studentId, snapshot) {
         reps: ex.weeks?.[0]?.reps || '',
         charge: ex.weeks?.[0]?.charge || null,
         weeks: ex.weeks || [],
-        video: savedYoutube[ex.name] || null,
+        video: ytUrlFor(ex) || null,
       });
     });
   });
@@ -1331,9 +1337,9 @@ function renderTraining() {
             </div>
           </div>
           <div class="ex-actions">
-            <div class="ex-video-badge ${(hasVideo || savedYoutube[ex.name]) ? 'has-video' : ''}"
+            <div class="ex-video-badge ${(hasVideo || ytUrlFor(ex)) ? 'has-video' : ''}"
                  onclick="openExerciseModal(${currentDay},${i})">
-              ${(hasVideo || savedYoutube[ex.name]) ? '▶ Vidéo' : '+ Vidéo'}
+              ${(hasVideo || ytUrlFor(ex)) ? '▶ Vidéo' : (isCoach() ? '+ Vidéo' : '')}
             </div>
             <button class="ex-delete-btn" onclick="deleteExercise(${currentDay},${i})" title="Supprimer">✕</button>
           </div>
@@ -2289,7 +2295,7 @@ function openExerciseModal(dayId, exIdx) {
   }
 
   // Restore YouTube state
-  const ytUrl = savedYoutube[ex.name] || '';
+  const ytUrl = ytUrlFor(ex);
   document.getElementById('youtube-url-input').value = ytUrl;
   if (ytUrl) {
     setYoutubeIframe(ytUrl);
@@ -2300,11 +2306,19 @@ function openExerciseModal(dayId, exIdx) {
   }
 
   // Show the tab that has content, default to file
-  if (!savedVideos[ex.name] && savedYoutube[ex.name]) {
+  if (!savedVideos[ex.name] && ytUrl) {
     switchVideoTab('youtube');
   } else {
     switchVideoTab('file');
   }
+
+  // Students only watch: no link input, no local-file tab (files never leave the coach's device)
+  const readOnly = !isCoach();
+  const inputRow = document.querySelector('#vpanel-youtube .youtube-input-row');
+  if (inputRow) inputRow.style.display = readOnly ? 'none' : '';
+  const fileTab = document.getElementById('vtab-file');
+  if (fileTab) fileTab.style.display = readOnly ? 'none' : '';
+  if (readOnly) switchVideoTab('youtube');
 
   document.getElementById('video-modal').classList.remove('hidden');
 }
@@ -2409,6 +2423,9 @@ function saveYoutubeLink() {
   } else {
     delete savedYoutube[currentExercise];
   }
+  // Keep the plan itself in sync: it is what gets saved to Supabase and read by students
+  Object.values(trainingData.days).forEach(d =>
+    (d.exercises || []).forEach(e => { if (e.name === currentExercise) e.youtube_url = url || null; }));
   localStorage.setItem(pk('youtube'), JSON.stringify(savedYoutube));
   setYoutubeIframe(url);
   renderTraining();
@@ -3766,6 +3783,18 @@ async function loadStudentData(studentId) {
       renderSelectors();
       renderTraining();
       _renderSeanceFooter(currentDay + '_' + currentWeek);
+    } else {
+      // Plan cache is current, but video links may have been added since: always sync them
+      let ytChanged = false;
+      (plan.exercise_assignments || []).forEach(a => {
+        const day = trainingData.days[a.day_number];
+        const ex = day && (day.exercises || []).find(e => e.name === a.name);
+        if (ex && (ex.youtube_url || null) !== (a.youtube_url || null)) { ex.youtube_url = a.youtube_url || null; ytChanged = true; }
+      });
+      if (ytChanged) {
+        localStorage.setItem(pk('training'), JSON.stringify(trainingData.days));
+        renderTraining();
+      }
     }
   }
 
