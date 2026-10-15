@@ -2335,16 +2335,17 @@ body {
   overscroll-behavior: contain;
 }
 
-@keyframes wmSlideLeft {
-  from { transform: translateX(0); opacity: 1; }
-  to   { transform: translateX(-12px); opacity: 0; }
+/* The overlay stays opaque; only the incoming exercise slides in */
+@keyframes wmEnterNext {
+  from { transform: translateX(32px);  opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
 }
-@keyframes wmSlideRight {
-  from { transform: translateX(0); opacity: 1; }
-  to   { transform: translateX(12px); opacity: 0; }
+@keyframes wmEnterPrev {
+  from { transform: translateX(-32px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
 }
-.wm-slide-left  { animation: wmSlideLeft  0.22s ease forwards; }
-.wm-slide-right { animation: wmSlideRight 0.22s ease forwards; }
+.wm-body.wm-enter-next { animation: wmEnterNext 0.26s cubic-bezier(0.22, 1, 0.36, 1); }
+.wm-body.wm-enter-prev { animation: wmEnterPrev 0.26s cubic-bezier(0.22, 1, 0.36, 1); }
 
 .wm-header {
   display: flex;
@@ -2840,18 +2841,6 @@ body {
     z-index: 490;
   }
 }
-
-@keyframes wmBodyIn {
-  from { opacity: 0; transform: translateX(18px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-@keyframes wmBodyInRev {
-  from { opacity: 0; transform: translateX(-18px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-/* Applied to wm-body only — header and nav stay fixed */
-.wm-slide-left  .wm-body { animation: wmBodyIn    0.25s cubic-bezier(0.4,0,0.2,1) forwards; }
-.wm-slide-right .wm-body { animation: wmBodyInRev 0.25s cubic-bezier(0.4,0,0.2,1) forwards; }
 
 .wm-header {
   display: flex;

@@ -941,7 +941,7 @@ function _wmRender(dir) {
 
   const defaultSecs = timerDefaults[ex.name] || 90;
 
-  overlay.innerHTML = `
+  const html = `
     <div class="wm-header">
       <button class="wm-close" onclick="_wmClose()">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -1031,6 +1031,27 @@ function _wmRender(dir) {
       }
     </div>`;
 
+  // First render: build everything. Later renders (Suivant/Précédent): keep the
+  // opaque overlay and the header in place, swap only body + nav, and let the
+  // progress bar animate its width instead of being recreated.
+  const header = overlay.querySelector('.wm-header');
+  if (dir && header) {
+    const tpl = document.createElement('div');
+    tpl.innerHTML = html;
+    header.querySelector('.wm-progress-bar').style.width = progressPct + '%';
+    header.querySelector('.wm-count').textContent = (current + 1) + ' / ' + total;
+    overlay.querySelector('.wm-nav').replaceWith(tpl.querySelector('.wm-nav'));
+    const body = tpl.querySelector('.wm-body');
+    overlay.querySelector('.wm-body').replaceWith(body);
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const cls = dir === 'next' ? 'wm-enter-next' : 'wm-enter-prev';
+      body.classList.add(cls);
+      body.addEventListener('animationend', () => body.classList.remove(cls), { once: true });
+    }
+  } else {
+    overlay.innerHTML = html;
+  }
+
   // Wire voice player after render
   if (hasVoice) {
     const audioEl = document.getElementById('wm-voice-audio');
@@ -1046,14 +1067,6 @@ function _wmRender(dir) {
       } catch (_) { audioEl.src = dataUrl; }
       _wireWmVoicePlayer(audioEl);
     }
-  }
-
-  // Slide animation — class on overlay, animation targets .wm-body via CSS descendant
-  if (dir) {
-    overlay.classList.remove('wm-slide-left', 'wm-slide-right');
-    void overlay.offsetWidth;
-    overlay.classList.add(dir === 'next' ? 'wm-slide-left' : 'wm-slide-right');
-    setTimeout(() => overlay.classList.remove('wm-slide-left', 'wm-slide-right'), 300);
   }
 }
 
