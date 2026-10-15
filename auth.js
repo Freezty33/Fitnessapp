@@ -105,13 +105,9 @@ async function _buildCoachSwitcher() {
   const controls    = document.getElementById('coach-header-controls');
   const drawerCtrls = document.getElementById('coach-drawer-controls');
 
-  if (!students || !students.length) {
-    if (controls)    controls.style.display    = 'none';
-    if (drawerCtrls) drawerCtrls.style.display = 'none';
-    return;
-  }
-
-  _students = students.map(st => {
+  // A coach with 0 students must still see the controls (incl. "+ Ajouter"),
+  // otherwise there is no way to create the first student.
+  _students = (students || []).map(st => {
     const prof = st['profiles!student_profiles_user_id_fkey'] || st.profiles;
     return { id: st.id, name: (prof && prof.full_name) ? prof.full_name : st.id };
   });
@@ -129,7 +125,7 @@ async function _buildCoachSwitcher() {
     restored = validIds[0] ?? null;
   }
   _viewingStudentId = restored;
-  if (typeof Ctx !== 'undefined') Ctx.set(restored, { persist: true });
+  if (typeof Ctx !== 'undefined' && restored) Ctx.set(restored, { persist: true });
   _renderStudentSwitcher();
 
   if (controls)    controls.style.display    = 'flex';
@@ -141,13 +137,17 @@ function _renderStudentSwitcher() {
 
   // Desktop pill label
   const label = document.getElementById('student-switcher-label');
-  if (label) label.textContent = current ? current.name : '—';
+  if (label) label.textContent = current ? current.name : 'Aucun étudiant';
 
-  // "Vous consultez" banner (coach only) — guards against editing the wrong student
+  const delBtn = document.getElementById('coach-delete-btn');
+  if (delBtn) delBtn.style.display = current ? '' : 'none';
+
+  // "Vous consultez" banner (coach only) — guards against editing the wrong student.
+  // With 0 students it stays visible as the mobile entry point to "+ Ajouter".
   const banner = document.getElementById('viewing-banner');
   if (banner) {
-    banner.style.display = current ? 'block' : 'none';
-    banner.textContent = current ? 'Vous consultez : ' + current.name + ' ▾' : '';
+    banner.style.display = 'block';
+    banner.textContent = current ? 'Vous consultez : ' + current.name + ' ▾' : 'Aucun étudiant — appuyez pour en ajouter ▾';
     banner.style.cursor = 'pointer';
     banner.onclick = _openStudentSheet;
   }
@@ -216,6 +216,12 @@ function _openStudentSheet() {
   title.textContent = 'Changer d\'étudiant';
   title.style.cssText = 'font-weight:700;margin-bottom:10px;color:var(--accent,#C8FF00)';
   box.appendChild(title);
+  if (!_students.length) {
+    const empty = document.createElement('div');
+    empty.textContent = 'Aucun étudiant pour le moment. Ajoutez votre premier étudiant pour commencer.';
+    empty.style.cssText = 'color:#aaa;font-size:13px;margin-bottom:10px';
+    box.appendChild(empty);
+  }
   _students.forEach(st => {
     const item = document.createElement('button');
     item.className = 'student-switcher-item' + (st.id === _viewingStudentId ? ' active' : '');
@@ -247,7 +253,7 @@ function _openStudentSheet() {
   del.textContent = '🗑';
   del.addEventListener('click', () => { overlay.remove(); _confirmDeleteStudent(); });
   row.appendChild(add);
-  row.appendChild(del);
+  if (_students.length) row.appendChild(del);
   box.appendChild(row);
   overlay.appendChild(box);
   document.body.appendChild(overlay);
