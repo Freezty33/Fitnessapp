@@ -3620,3 +3620,9 @@ body {
 .rdv-slot-mine .rdv-slot-time {
   color: var(--accent);
 }
+
+/* Coach on phone: editable workout-mode fields */
+.wm-ex-tips-edit:empty::before { content: attr(data-ph); opacity: .45; }
+.wm-ex-name[contenteditable], .wm-ex-tips[contenteditable], .sdo-day-title[contenteditable],
+.wm-stat-card .wm-stat-val[contenteditable] { outline: none; border-bottom: 1px dashed rgba(200,255,0,.35); }
+.wm-video-btn { cursor: pointer; border: none; font-family: inherit; }

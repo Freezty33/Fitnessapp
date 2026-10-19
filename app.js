@@ -499,6 +499,36 @@ function repeatTraining(sourceDay) {
   renderTraining();
 }
 
+// Coach using the installed phone app (<=480px) on a student's plan: editable fields
+function _isCoachMobile() {
+  return typeof isCoach === 'function' && isCoach() && window.innerWidth <= 480 &&
+         typeof activeStudentId === 'function' && !!activeStudentId();
+}
+
+function _wmSaveName(el) {
+  const ex = _wm.exercises[_wm.current];
+  ex.name = el.textContent.trim() || 'Exercice';
+  persistTraining();
+}
+function _wmSaveTips(el) {
+  _wm.exercises[_wm.current].tips = el.textContent.trim();
+  persistTraining();
+}
+function _wmSaveWeek(field, el) {
+  const ex = _wm.exercises[_wm.current];
+  const raw = el.textContent.trim();
+  const num = parseFloat(raw);
+  while (ex.weeks.length <= _wm.wIdx) ex.weeks.push({ series:'', reps:'', charge:'', done:'' });
+  ex.weeks[_wm.wIdx][field] = isNaN(num) ? raw : num;
+  persistTraining();
+  const w = ex.weeks[_wm.wIdx];
+  const ov = document.querySelector('.wm-objectif-val');
+  if (ov) {
+    const c = w.charge !== undefined && w.charge !== '' ? w.charge + ' kg' : '—';
+    ov.innerHTML = `${h(String(w.series || '—'))} × ${h(String(w.reps || '—'))} <span class="wm-objectif-charge">${h(c)}</span>`;
+  }
+}
+
 function _renderExtraTraining(grid) {
   const extra = extraTrainings[currentWeek];
   const exercises = (extra && extra.exercises) || [];
@@ -764,7 +794,7 @@ function _renderStudentDayOverview(grid, dayData, wIdx) {
         </div>
         <div class="sdo-ex-right">
           ${hasV ? '<span class="sdo-voice-chip">🎙</span>' : ''}
-          ${ex.youtube_url ? `<a class="sdo-video-badge" href="${ex.youtube_url}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">▶</a>` : ''}
+          ${ytUrlFor(ex) ? `<a class="sdo-video-badge" href="${ytUrlFor(ex)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">▶</a>` : ''}
           <svg class="sdo-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9,18 15,12 9,6"/></svg>
         </div>
       </div>`;
@@ -780,7 +810,7 @@ function _renderStudentDayOverview(grid, dayData, wIdx) {
       <div class="sdo-hero">
         <div class="sdo-hero-content">
           <span class="sdo-week-badge">Semaine ${currentWeek}</span>
-          <h2 class="sdo-day-title">${h(dayData.label)}</h2>
+          <h2 class="sdo-day-title"${_isCoachMobile() ? ` contenteditable="true" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" onblur="saveDayLabel(${currentDay},this)"` : ''}>${h(dayData.label)}</h2>
           <div class="sdo-meta">
             <span>${totalExs} exercice${totalExs > 1 ? 's' : ''}</span>
             ${completedCount > 0 ? `<span class="sdo-meta-dot">·</span><span>${completedCount}/${totalExs} terminés</span>` : ''}
@@ -831,6 +861,7 @@ function _renderStudentDayOverview(grid, dayData, wIdx) {
       <div class="seance-actions">
         <button class="btn-add-exercise" onclick="addExercise()">+ Exercice</button>
         <button class="btn-download-pdf" onclick="downloadPlanPDF()" title="Télécharger le programme en PDF">⬇ PDF</button>
+        ${_isCoachMobile() ? `<button class="btn-add-exercise" onclick="repeatTraining(${currentDay})">🔁 Répéter</button>` : ''}
       </div>
     </div>`;
 }
@@ -940,6 +971,7 @@ function _wmRender(dir) {
   }
 
   const defaultSecs = timerDefaults[ex.name] || 90;
+  const coachEdit = _isCoachMobile();
 
   const html = `
     <div class="wm-header">
@@ -955,8 +987,10 @@ function _wmRender(dir) {
     <div class="wm-body">
       <div class="wm-ex-title-row">
         <div class="wm-ex-title-text">
-          <h2 class="wm-ex-name">${h(ex.name)}</h2>
-          ${ex.tips ? `<p class="wm-ex-tips">${h(ex.tips)}</p>` : `<p class="wm-ex-tips wm-ex-tips-empty">Ajouter des conseils...</p>`}
+          <h2 class="wm-ex-name" id="wm-name-input"${coachEdit ? ` contenteditable="true" onblur="_wmSaveName(this)"` : ''}>${h(ex.name)}</h2>
+          ${coachEdit
+            ? `<p class="wm-ex-tips wm-ex-tips-edit" contenteditable="true" data-ph="Ajouter des conseils..." onblur="_wmSaveTips(this)">${h(ex.tips || '')}</p>`
+            : (ex.tips ? `<p class="wm-ex-tips">${h(ex.tips)}</p>` : `<p class="wm-ex-tips wm-ex-tips-empty">Ajouter des conseils...</p>`)}
         </div>
         <button class="wm-delete-btn" onclick="_wmDeleteExercise(${current})" title="Supprimer">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14H6L5,6"/><path d="M10,11v6M14,11v6"/><path d="M9,6V4h6v2"/></svg>
@@ -968,7 +1002,9 @@ function _wmRender(dir) {
         Note coach
       </button>`}
 
-      ${ex.youtube_url ? `<a class="wm-video-btn" href="${ex.youtube_url}" target="_blank" rel="noopener noreferrer">▶ Voir la vidéo</a>` : ''}
+      ${coachEdit
+        ? `<button class="wm-video-btn" onclick="openExerciseModal(${currentDay},${current})">${ytUrlFor(ex) ? '▶ Vidéo (modifier)' : '+ Vidéo'}</button>`
+        : (ytUrlFor(ex) ? `<a class="wm-video-btn" href="${ytUrlFor(ex)}" target="_blank" rel="noopener noreferrer">▶ Voir la vidéo</a>` : '')}
 
       <div class="wm-objectif-card">
         <span class="wm-card-label">OBJECTIF</span>
@@ -978,11 +1014,11 @@ function _wmRender(dir) {
       <div class="wm-stats-row">
         <div class="wm-stat-card">
           <span class="wm-stat-label">SÉRIES</span>
-          <span class="wm-stat-val">${series}</span>
+          <span class="wm-stat-val"${coachEdit ? ` contenteditable="true" inputmode="numeric" onblur="_wmSaveWeek('series',this)"` : ''}>${coachEdit && series === '—' ? '' : series}</span>
         </div>
         <div class="wm-stat-card">
           <span class="wm-stat-label">REPS</span>
-          <span class="wm-stat-val">${reps}</span>
+          <span class="wm-stat-val"${coachEdit ? ` contenteditable="true" onblur="_wmSaveWeek('reps',this)"` : ''}>${coachEdit && reps === '—' ? '' : reps}</span>
         </div>
         <div class="wm-stat-card wm-stat-card--editable">
           <span class="wm-stat-label">CHARGE (KG)</span>
@@ -2252,6 +2288,11 @@ function addExercise() {
   });
   persistTraining();
   renderTraining();
+  if (_isCoachMobile()) {
+    startWorkoutMode(dayData.exercises.length - 1);
+    setTimeout(() => { const n = document.getElementById('wm-name-input'); if (n) { n.focus(); selectAll(n); } }, 350);
+    return;
+  }
   // focus the new name for immediate editing
   setTimeout(() => {
     const cards = document.querySelectorAll('.exercise-card');
