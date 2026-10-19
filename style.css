@@ -3626,3 +3626,28 @@ body {
 .wm-ex-name[contenteditable], .wm-ex-tips[contenteditable], .sdo-day-title[contenteditable],
 .wm-stat-card .wm-stat-val[contenteditable] { outline: none; border-bottom: 1px dashed rgba(200,255,0,.35); }
 .wm-video-btn { cursor: pointer; border: none; font-family: inherit; }
+
+/* Workout-mode voice UI */
+.wm-voice { margin: 12px 0; }
+.voice-recorder {
+  display: flex; align-items: center; gap: 12px; padding: 12px;
+  background: rgba(200,255,0,.08); border: 1px solid rgba(200,255,0,.25);
+  border-radius: 8px; font-size: 13px;
+}
+.voice-rec-indicator {
+  flex: 1; display: flex; align-items: center; gap: 6px; color: var(--text);
+  font-weight: 600; animation: pulse 1s infinite;
+}
+.voice-rec-indicator::before { content: ''; width: 8px; height: 8px; background: #FF4444; border-radius: 50%; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.voice-stop-btn {
+  padding: 6px 12px; background: #FF4444; color: white; border: none;
+  border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.voice-stop-btn:active { opacity: 0.8; }
+.voice-delete-btn {
+  background: none; border: none; color: var(--text); cursor: pointer;
+  font-size: 14px; padding: 4px; opacity: 0.6;
+}
+.voice-delete-btn:hover { opacity: 1; }
+.voice-play-btn.playing svg { fill: #C8FF00; }

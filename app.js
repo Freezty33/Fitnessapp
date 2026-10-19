@@ -72,6 +72,7 @@ let extraTrainings = {};
 let currentViewingExtra = false;
 // MediaRecorder state
 let _recState = {};
+let _wmRecording = null;  // { mr, stream } for workout-mode recording
 // Progress photos (keyed by "week_view" → data URL)
 let progressPhotos = {};
 // Body measurements (array of {week, poids, taille, waist, chest, armL, armR, thighL, thighR, hips, fat})
@@ -529,6 +530,79 @@ function _wmSaveWeek(field, el) {
   }
 }
 
+
+// ── Workout-mode voice recording (coach on mobile) ─────────────────
+function _wmStartVoice() {
+  if (_wmRecording) return;  // already recording
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert('Microphone non disponible sur cet appareil.');
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    const mime = _bestAudioMime();
+    const chunks = [];
+    const mr = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    const actualMime = mr.mimeType || mime || 'audio/webm';
+    mr.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+    mr.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(chunks, { type: actualMime });
+      const ex = _wm.exercises[_wm.current];
+      const voiceKey = currentDay + '_' + ex.name;
+      const reader = new FileReader();
+      reader.onload = () => {
+        savedVoice[voiceKey] = reader.result;
+        localStorage.setItem(pk('voice'), JSON.stringify(savedVoice));
+        _wmRecording = null;
+        _wmRender();  // re-render to show player
+      };
+      reader.readAsDataURL(blob);
+      _uploadVoiceToSupabase(blob, actualMime, voiceKey);
+    };
+    mr.start();
+    _wmRecording = { mr, stream };
+    _wmRender();  // re-render to show "Arrêter"
+  }).catch(err => {
+    const msg = err && err.name === 'NotAllowedError'
+      ? 'Accès au microphone refusé. Vérifie les permissions.'
+      : 'Microphone non accessible : ' + (err && err.message || err);
+    alert(msg);
+  });
+}
+
+function _wmStopVoice() {
+  if (!_wmRecording) return;
+  _wmRecording.mr.stop();
+}
+
+function _wmDeleteVoice() {
+  const ex = _wm.exercises[_wm.current];
+  const voiceKey = currentDay + '_' + ex.name;
+  delete savedVoice[voiceKey];
+  localStorage.setItem(pk('voice'), JSON.stringify(savedVoice));
+  _deleteVoiceFromSupabase(voiceKey);
+  _wmRender();
+}
+
+function _wmPlayVoice() {
+  const ex = _wm.exercises[_wm.current];
+  const voiceKey = currentDay + '_' + ex.name;
+  const dataUrl = savedVoice[voiceKey];
+  if (!dataUrl) return;
+  const audio = document.getElementById('wm-voice-audio');
+  if (!audio) return;
+  if (audio.src === dataUrl && !audio.paused) {
+    audio.pause();
+    const btn = document.getElementById('wm-voice-play-btn');
+    if (btn) btn.classList.remove('playing');
+  } else {
+    audio.src = dataUrl;
+    audio.play();
+    const btn = document.getElementById('wm-voice-play-btn');
+    if (btn) btn.classList.add('playing');
+  }
+}
+
 function _renderExtraTraining(grid) {
   const extra = extraTrainings[currentWeek];
   const exercises = (extra && extra.exercises) || [];
@@ -931,6 +1005,7 @@ function _wmRender(dir) {
   const total   = exercises.length;
   const isFirst = current === 0;
   const isLast  = current === total - 1;
+  const coachEdit = _isCoachMobile();
 
   const series = w.series !== undefined && w.series !== '' ? String(w.series) : '—';
   const reps   = w.reps   !== undefined && w.reps   !== '' ? String(w.reps)   : '—';
@@ -953,25 +1028,35 @@ function _wmRender(dir) {
   const vKey = currentDay + '_' + ex.name;
   const hasVoice = !!savedVoice[vKey];
   let voiceHtml = '';
-  if (hasVoice) {
-    voiceHtml = `
-      <div class="wm-voice">
-        <audio id="wm-voice-audio" preload="metadata"></audio>
-        <div class="voice-player" id="wm-voice-player">
-          <button class="voice-play-btn" id="wm-voice-play" onclick="toggleWmVoicePlay()" title="Note du coach">
-            <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M8 5v14l11-7z"/></svg>
-          </button>
-          <div class="voice-progress-wrap" id="wm-voice-prog-wrap" onclick="seekWmVoice(event)">
-            <div class="voice-progress-bar" id="wm-voice-prog"></div>
+  if (hasVoice || coachEdit) {
+    if (hasVoice) {
+      voiceHtml = `
+        <div class="wm-voice">
+          <audio id="wm-voice-audio" preload="metadata"></audio>
+          <div class="voice-player" id="wm-voice-player">
+            <button class="voice-play-btn" id="wm-voice-play-btn" onclick="_wmPlayVoice()" title="Note du coach">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <div class="voice-progress-wrap" onclick="seekWmVoice(event)">
+              <div class="voice-progress-bar" id="wm-voice-prog"></div>
+            </div>
+            <span class="voice-time" id="wm-voice-time">0:00</span>
+            <span class="wm-voice-label">Note coach</span>
+            ${coachEdit ? `<button class="voice-delete-btn" onclick="_wmDeleteVoice()" title="Supprimer">✕</button>` : ''}
           </div>
-          <span class="voice-time" id="wm-voice-time">0:00</span>
-          <span class="wm-voice-label">Note coach</span>
-        </div>
-      </div>`;
+        </div>`;
+    } else if (coachEdit && _wmRecording) {
+      voiceHtml = `
+        <div class="wm-voice">
+          <div class="voice-recorder">
+            <span class="voice-rec-indicator">● Enregistrement...</span>
+            <button class="voice-stop-btn" onclick="_wmStopVoice()">■ Arrêter</button>
+          </div>
+        </div>`;
+    }
   }
 
   const defaultSecs = timerDefaults[ex.name] || 90;
-  const coachEdit = _isCoachMobile();
 
   const html = `
     <div class="wm-header">
@@ -997,7 +1082,7 @@ function _wmRender(dir) {
         </button>
       </div>
 
-      ${voiceHtml || `<button class="wm-voice-add-btn" onclick="openVoiceModal('${h(currentDay)}_${h(ex.name)}')">
+      ${voiceHtml || `<button class="wm-voice-add-btn" onclick="${coachEdit ? '_wmStartVoice()' : `openVoiceModal('${h(currentDay)}_${h(ex.name)}')`}">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
         Note coach
       </button>`}
