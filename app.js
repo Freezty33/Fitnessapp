@@ -129,6 +129,19 @@ function flushPendingPlanSave() {
   _savePlanToSupabase(sid, snap);
 }
 
+// Coach edit of series/reps/charge on week wIdx -> push to the following weeks.
+// A later week is overwritten only if it is empty or still holds the previous
+// value of the edited week (i.e. untouched default), so manual progressions survive.
+function _propagateToNextWeeks(ex, wIdx, field, oldVal) {
+  if (typeof isCoach !== 'function' || !isCoach()) return;
+  if (field !== 'series' && field !== 'reps' && field !== 'charge') return;
+  const newVal = ex.weeks[wIdx][field];
+  for (let i = wIdx + 1; i < ex.weeks.length; i++) {
+    const cur = ex.weeks[i][field];
+    if (cur === undefined || cur === '' || String(cur) === String(oldVal ?? '')) ex.weeks[i][field] = newVal;
+  }
+}
+
 function persistTraining() {
   localStorage.setItem(pk('training'), JSON.stringify(trainingData.days));
   // Capture the student and a deep copy of the plan at EDIT TIME, not at timer-fire time (fixes C7)
@@ -515,19 +528,41 @@ function _wmSaveTips(el) {
   _wm.exercises[_wm.current].tips = el.textContent.trim();
   persistTraining();
 }
+// Pure numbers become numbers; anything else ("11-12", "3x10") stays as typed
+function _parsePlanValue(raw) {
+  return /^\d+([.,]\d+)?$/.test(raw) ? parseFloat(raw.replace(',', '.')) : raw;
+}
+
+function _wmRefreshObjectif() {
+  if (!_wm) return;
+  const ex = _wm.exercises[_wm.current];
+  const w = (ex.weeks && ex.weeks[_wm.wIdx]) || {};
+  const ov = document.querySelector('.wm-objectif-val');
+  if (!ov) return;
+  const c = w.charge !== undefined && w.charge !== '' ? w.charge + ' kg' : '—';
+  ov.innerHTML = `${h(String(w.series || '—'))} × ${h(String(w.reps || '—'))} <span class="wm-objectif-charge">${h(c)}</span>`;
+}
+
+// Debounced save while typing (iOS contenteditable does not blur on background taps)
+let _wmInputTimer = null;
+function _wmQueueSave(kind, el) {
+  clearTimeout(_wmInputTimer);
+  _wmInputTimer = setTimeout(() => {
+    if (!_wm) return;
+    if (kind === 'charge') saveWmCharge(); else _wmSaveWeek(kind, el);
+  }, 500);
+}
+
 function _wmSaveWeek(field, el) {
   const ex = _wm.exercises[_wm.current];
-  const raw = el.textContent.trim();
-  const num = parseFloat(raw);
+  const val = _parsePlanValue(el.textContent.trim());
   while (ex.weeks.length <= _wm.wIdx) ex.weeks.push({ series:'', reps:'', charge:'', done:'' });
-  ex.weeks[_wm.wIdx][field] = isNaN(num) ? raw : num;
+  const oldVal = ex.weeks[_wm.wIdx][field];
+  if (String(oldVal ?? '') === String(val)) return;
+  ex.weeks[_wm.wIdx][field] = val;
+  _propagateToNextWeeks(ex, _wm.wIdx, field, oldVal);
   persistTraining();
-  const w = ex.weeks[_wm.wIdx];
-  const ov = document.querySelector('.wm-objectif-val');
-  if (ov) {
-    const c = w.charge !== undefined && w.charge !== '' ? w.charge + ' kg' : '—';
-    ov.innerHTML = `${h(String(w.series || '—'))} × ${h(String(w.reps || '—'))} <span class="wm-objectif-charge">${h(c)}</span>`;
-  }
+  _wmRefreshObjectif();
 }
 
 
@@ -776,7 +811,8 @@ function addWeek() {
   Object.values(trainingData.days).forEach(day => {
     day.exercises.forEach(ex => {
       while (ex.weeks.length < weekCount) {
-        ex.weeks.push({ series: '', reps: '', charge: '', done: '' });
+        const prev = ex.weeks[ex.weeks.length - 1] || {};
+        ex.weeks.push({ series: prev.series ?? '', reps: prev.reps ?? '', charge: prev.charge ?? '', done: '' });
       }
     });
   });
@@ -956,7 +992,11 @@ function startWorkoutMode(startIdx) {
 
   // Swipe detection
   let touchStartX = 0;
-  overlay.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, { passive: true });
+  overlay.addEventListener('touchstart', e => {
+    touchStartX = e.touches[0].clientX;
+    const a = document.activeElement;
+    if (a && a.isContentEditable && !e.target.closest('[contenteditable="true"]')) a.blur();
+  }, { passive: true });
   overlay.addEventListener('touchend', e => {
     const dx = e.changedTouches[0].clientX - touchStartX;
     if (Math.abs(dx) > 60) {
@@ -969,6 +1009,8 @@ function startWorkoutMode(startIdx) {
 }
 
 function _wmClose() {
+  clearTimeout(_wmInputTimer);
+  if (_wm) { saveWmCharge(); saveWmDone(); }
   if (_wm && _wm.overlay) _wm.overlay.remove();
   _wm = null;
   if (_wmTimerState) { clearInterval(_wmTimerState.interval); _wmTimerState = null; }
@@ -1099,16 +1141,16 @@ function _wmRender(dir) {
       <div class="wm-stats-row">
         <div class="wm-stat-card">
           <span class="wm-stat-label">SÉRIES</span>
-          <span class="wm-stat-val"${coachEdit ? ` contenteditable="true" inputmode="numeric" onblur="_wmSaveWeek('series',this)"` : ''}>${coachEdit && series === '—' ? '' : series}</span>
+          <span class="wm-stat-val"${coachEdit ? ` contenteditable="true" inputmode="text" oninput="_wmQueueSave('series',this)" onblur="_wmSaveWeek('series',this)"` : ''}>${coachEdit && series === '—' ? '' : series}</span>
         </div>
         <div class="wm-stat-card">
           <span class="wm-stat-label">REPS</span>
-          <span class="wm-stat-val"${coachEdit ? ` contenteditable="true" onblur="_wmSaveWeek('reps',this)"` : ''}>${coachEdit && reps === '—' ? '' : reps}</span>
+          <span class="wm-stat-val"${coachEdit ? ` contenteditable="true" inputmode="text" oninput="_wmQueueSave('reps',this)" onblur="_wmSaveWeek('reps',this)"` : ''}>${coachEdit && reps === '—' ? '' : reps}</span>
         </div>
         <div class="wm-stat-card wm-stat-card--editable">
           <span class="wm-stat-label">CHARGE (KG)</span>
           <span class="wm-stat-val" contenteditable="true" id="wm-charge-input"
-                inputmode="decimal" onblur="saveWmCharge()">${charge !== '—' ? charge : ''}</span>
+                inputmode="decimal" oninput="_wmQueueSave('charge',this)" onblur="saveWmCharge()">${charge !== '—' ? charge : ''}</span>
         </div>
       </div>
 
@@ -1211,9 +1253,13 @@ function saveWmCharge() {
   const ex = exercises[current];
   if (!ex.weeks) ex.weeks = [];
   while (ex.weeks.length <= wIdx) ex.weeks.push({ series:'', reps:'', charge:'', done:'' });
+  const oldCharge = ex.weeks[wIdx].charge;
+  if (String(oldCharge ?? '') === val) return;
   ex.weeks[wIdx].charge = val;
+  _propagateToNextWeeks(ex, wIdx, 'charge', oldCharge);
   trainingData.days[currentDay].exercises[current] = ex;
   persistTraining();
+  _wmRefreshObjectif();
   _syncWmLog();
 }
 
@@ -2228,11 +2274,12 @@ function saveField(dayId, exIdx, field, el) {
 
 function saveWeekField(dayId, exIdx, wIdx, field, el) {
   const raw = el.textContent.trim();
-  const num = parseFloat(raw);
-  const val = isNaN(num) ? raw : num;
+  const val = _parsePlanValue(raw);
   const weeks = trainingData.days[dayId].exercises[exIdx].weeks;
   while (weeks.length <= wIdx) weeks.push({ series:'', reps:'', charge:'', done:'' });
+  const oldVal = weeks[wIdx][field];
   weeks[wIdx][field] = val;
+  _propagateToNextWeeks(trainingData.days[dayId].exercises[exIdx], wIdx, field, oldVal);
   persistTraining();
   updateKPIs();
   if (field === 'done') _updateTrainingTabDot();
