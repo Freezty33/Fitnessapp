@@ -3651,3 +3651,20 @@ body {
 }
 .voice-delete-btn:hover { opacity: 1; }
 .voice-play-btn.playing svg { fill: #C8FF00; }
+
+/* Coach: full-width destructive action under seance-actions */
+.btn-delete-plan {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 4px 12px 12px;
+  padding: 12px;
+  background: rgba(255,68,68,.08);
+  border: 1px solid rgba(255,68,68,.35);
+  color: #FF6B6B;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+}
+.btn-delete-plan:active { background: rgba(255,68,68,.16); }

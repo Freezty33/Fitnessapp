@@ -554,6 +554,7 @@ function _wmQueueSave(kind, el) {
 }
 
 function _wmSaveWeek(field, el) {
+  if (!_wm || !_wm.exercises[_wm.current]) return;
   const ex = _wm.exercises[_wm.current];
   const val = _parsePlanValue(el.textContent.trim());
   while (ex.weeks.length <= _wm.wIdx) ex.weeks.push({ series:'', reps:'', charge:'', done:'' });
@@ -565,6 +566,76 @@ function _wmSaveWeek(field, el) {
   _wmRefreshObjectif();
 }
 
+
+
+// ── Coach: wipe everything tied to this student's training plan ──
+// Exercises, feedback, voice notes, extra trainings and exercise logs
+// (NOT body measurements/photos — those are a separate progress track).
+async function deleteTrainingPlan() {
+  if (typeof isCoach !== 'function' || !isCoach()) return;
+  const studentId = typeof activeStudentId === 'function' ? activeStudentId() : null;
+  if (!studentId) return;
+  if (!confirm(
+    "Supprimer tout le plan d'entraînement de cet étudiant ?\n\n" +
+    "Seront supprimés : tous les exercices, les bilans de séance, les notes vocales, " +
+    "les entraînements supplémentaires et la progression enregistrée (séries/reps/charge/réalisé).\n" +
+    "Les mesures corporelles et photos ne sont PAS touchées.\n\n" +
+    "Cette action est irréversible."
+  )) return;
+
+  const failedSteps = [];
+
+  // 1. Voice notes: storage files + DB rows
+  try {
+    if (typeof sb !== 'undefined') {
+      const { data: rows } = await sb.from('coach_voice_notes').select('storage_path').eq('student_id', studentId);
+      const paths = (rows || []).map(r => r.storage_path).filter(Boolean);
+      if (paths.length) await sb.storage.from('voice-notes').remove(paths);
+      await sb.from('coach_voice_notes').delete().eq('student_id', studentId);
+    }
+  } catch (e) { console.warn('[delete plan] voice', e); failedSteps.push('notes vocales'); }
+
+  // 2. Session feedback (bilans)
+  try {
+    if (typeof sb !== 'undefined') await sb.from('session_feedback').delete().eq('student_id', studentId);
+  } catch (e) { console.warn('[delete plan] feedback', e); failedSteps.push('bilans de séance'); }
+
+  // 3. Extra trainings
+  try {
+    if (typeof sb !== 'undefined') await sb.from('extra_trainings').delete().eq('student_id', studentId);
+  } catch (e) { console.warn('[delete plan] extra', e); failedSteps.push('entraînements supplémentaires'); }
+
+  // 4. Exercise logs (student-side progress) via coach-only RPC (see migrations/006)
+  try {
+    if (typeof sb !== 'undefined') {
+      const { error } = await sb.rpc('clear_student_progress', { p_student: studentId });
+      if (error) throw error;
+    }
+  } catch (e) { console.warn('[delete plan] logs', e); failedSteps.push('progression (exercise_logs)'); }
+
+  // 5. Local state (voice, feedback, extra trainings)
+  savedVoice = {};
+  workoutFeedback = {};
+  extraTrainings = {};
+  localStorage.setItem(pk('voice'), JSON.stringify(savedVoice));
+  localStorage.setItem(pk('feedback'), JSON.stringify(workoutFeedback));
+  localStorage.setItem(pk('extraTrainings'), JSON.stringify(extraTrainings));
+
+  // 6. Wipe exercises in every day, keep day labels. Save last (clears exercise_assignments via RPC).
+  Object.values(trainingData.days).forEach(day => { day.exercises = []; });
+  persistTraining();
+
+  renderSelectors();
+  renderTraining();
+  updateKPIs();
+  if (typeof _updateTrainingTabDot === 'function') _updateTrainingTabDot();
+
+  if (failedSteps.length) {
+    alert('Plan supprimé. Erreur sur : ' + failedSteps.join(', ') + '. Vérifie la connexion et réessaie si besoin.');
+  } else {
+    alert('Plan d\'entraînement supprimé.');
+  }
+}
 
 // ── Workout-mode voice recording (coach on mobile) ─────────────────
 function _wmStartVoice() {
@@ -973,6 +1044,7 @@ function _renderStudentDayOverview(grid, dayData, wIdx) {
         <button class="btn-download-pdf" onclick="downloadPlanPDF()" title="Télécharger le programme en PDF">⬇ PDF</button>
         ${_isCoachMobile() ? `<button class="btn-add-exercise" onclick="repeatTraining(${currentDay})">🔁 Répéter</button>` : ''}
       </div>
+      ${typeof isCoach === 'function' && isCoach() ? `<button class="btn-delete-plan" onclick="deleteTrainingPlan()">🗑 Supprimer le plan d'entraînement</button>` : ''}
     </div>`;
 }
 
@@ -1010,7 +1082,7 @@ function startWorkoutMode(startIdx) {
 
 function _wmClose() {
   clearTimeout(_wmInputTimer);
-  if (_wm) { saveWmCharge(); saveWmDone(); }
+  if (_wm) { try { saveWmCharge(); saveWmDone(); } catch (e) { console.warn('[wm close]', e); } }
   if (_wm && _wm.overlay) _wm.overlay.remove();
   _wm = null;
   if (_wmTimerState) { clearInterval(_wmTimerState.interval); _wmTimerState = null; }
@@ -1237,6 +1309,7 @@ function _wmDeleteExercise(idx) {
   if (!_wm) return;
   const ex = _wm.exercises[idx];
   if (!confirm(`Supprimer « ${ex.name} » ?`)) return;
+  clearTimeout(_wmInputTimer);
   trainingData.days[currentDay].exercises.splice(idx, 1);
   persistTraining();
   if (_wm.exercises.length === 0) { _wmClose(); return; }
@@ -1247,6 +1320,7 @@ function _wmDeleteExercise(idx) {
 function saveWmCharge() {
   if (!_wm) return;
   const { exercises, wIdx, current } = _wm;
+  if (!exercises[current]) return;
   const el = document.getElementById('wm-charge-input');
   if (!el) return;
   const val = el.textContent.trim();
@@ -1266,6 +1340,7 @@ function saveWmCharge() {
 function saveWmDone() {
   if (!_wm) return;
   const { exercises, wIdx, current } = _wm;
+  if (!exercises[current]) return;
   const el = document.getElementById('wm-done-input');
   if (!el) return;
   const val = el.textContent.trim();
